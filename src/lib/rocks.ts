@@ -1,66 +1,68 @@
 // src/lib/rocks.ts
-// Purpose: All Firestore operations related to Rocks (CRUD)
+"use client";
 
-import { db } from "@/lib/firebase";
 import {
   collection,
   doc,
   getDoc,
-  addDoc,
-  updateDoc,
+  getDocs,
+  orderBy,
+  query,
   serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
+  type DocumentData,
 } from "firebase/firestore";
 
-export type Rock = {
-  id?: string;
-  title: string;
-  finalStatement: string;
-  status: "On Track" | "At Risk" | "Off Track";
-  dueDate: string | null;
-  ownerId: string;
-  createdAt?: any;
-  updatedAt?: any;
-};
+import { getDbClient } from "@/lib/firebase";
+import type { Rock } from "@/types/rock";
 
-/**
- * Create a new Rock
- */
-export async function createRock(ownerId: string): Promise<string> {
-  const ref = await addDoc(collection(db, "rocks"), {
-    title: "Untitled Rock",
-    finalStatement: "",
-    status: "On Track",
-    dueDate: null,
-    ownerId,
+function rocksCol(uid: string) {
+  const db = getDbClient();
+  return collection(db, `users/${uid}/rocks`);
+}
+
+function rockDoc(uid: string, rockId: string) {
+  const db = getDbClient();
+  return doc(db, `users/${uid}/rocks/${rockId}`);
+}
+
+export async function getRock(uid: string, rockId: string): Promise<Rock | null> {
+  const snap = await getDoc(rockDoc(uid, rockId));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...(snap.data() as DocumentData) } as Rock;
+}
+
+export async function listRocks(uid: string, opts?: { includeArchived?: boolean }) {
+  const includeArchived = Boolean(opts?.includeArchived);
+
+  const q = includeArchived
+    ? query(rocksCol(uid), orderBy("updatedAt", "desc"))
+    : query(
+        rocksCol(uid),
+        where("archived", "==", false),
+        orderBy("updatedAt", "desc")
+      );
+
+  const snaps = await getDocs(q);
+  return snaps.docs.map((d) => ({ id: d.id, ...(d.data() as DocumentData) })) as Rock[];
+}
+
+export async function createRock(uid: string, rock: Rock) {
+  const ref = rockDoc(uid, rock.id);
+  await setDoc(ref, {
+    ...rock,
+    archived: Boolean(rock.archived),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-
-  return ref.id;
 }
 
-/**
- * Load a Rock by ID
- */
-export async function getRock(rockId: string): Promise<Rock | null> {
-  const ref = doc(db, "rocks", rockId);
-  const snap = await getDoc(ref);
-
-  if (!snap.exists()) return null;
-
-  return { id: snap.id, ...(snap.data() as Rock) };
-}
-
-/**
- * Update a Rock
- */
-export async function updateRock(
-  rockId: string,
-  data: Partial<Rock>
-) {
-  const ref = doc(db, "rocks", rockId);
+export async function updateRock(uid: string, rockId: string, patch: Partial<Rock>) {
+  const ref = rockDoc(uid, rockId);
   await updateDoc(ref, {
-    ...data,
+    ...patch,
     updatedAt: serverTimestamp(),
   });
 }

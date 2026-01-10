@@ -1,37 +1,32 @@
+// src/lib/auth.ts
 "use client";
 
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
-import type { User } from "firebase/auth";
-import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "./firebase";
+import {
+  GoogleAuthProvider,
+  signInWithPopup,
+  signOut,
+  onAuthStateChanged,
+  type User,
+} from "firebase/auth";
+import { getAuthClient } from "@/lib/firebase";
 
-type AuthContextValue = {
-  user: User | null;
-  loading: boolean;
-};
+/**
+ * Client-only auth helpers.
+ */
 
-const AuthContext = createContext<AuthContextValue | null>(null);
-
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setUser(u ?? null);
-      setLoading(false);
-    });
-    return () => unsub();
-  }, []);
-
-  const value = useMemo<AuthContextValue>(() => ({ user, loading }), [user, loading]);
-
-  // IMPORTANT: no JSX here, because this file is .ts (not .tsx)
-  return React.createElement(AuthContext.Provider, { value }, children);
+export function listenForAuthChanges(onUser: (user: User | null) => void) {
+  const auth = getAuthClient();
+  return onAuthStateChanged(auth, onUser);
 }
 
-export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used inside <AuthProvider>.");
-  return ctx;
+export async function signInWithGoogle(): Promise<User> {
+  const auth = getAuthClient();
+  const provider = new GoogleAuthProvider();
+  const result = await signInWithPopup(auth, provider);
+  return result.user;
+}
+
+export async function logout(): Promise<void> {
+  const auth = getAuthClient();
+  await signOut(auth);
 }
