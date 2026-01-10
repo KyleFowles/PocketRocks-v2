@@ -1,43 +1,23 @@
-// src/lib/useAuth.ts
 "use client";
 
-import { useEffect, useState } from "react";
-import type { User } from "firebase/auth";
-import { listenForAuthChanges } from "@/lib/auth";
+// FILE: src/lib/useAuth.ts
 
-type AuthState = {
+import { createContext, useContext } from "react";
+import type { User } from "firebase/auth";
+
+export type AuthState = {
   user: User | null;
+  uid: string | null;
   loading: boolean;
-  error: string | null;
+  signOut: () => Promise<void>;
 };
 
+export const AuthContext = createContext<AuthState | null>(null);
+
 export function useAuth(): AuthState {
-  const [state, setState] = useState<AuthState>({
-    user: null,
-    loading: true,
-    error: null,
-  });
-
-  useEffect(() => {
-    let unsub: (() => void) | null = null;
-
-    try {
-      unsub = listenForAuthChanges((user) => {
-        setState({ user, loading: false, error: null });
-      });
-    } catch (e: any) {
-      // This catches "Firebase is not configured" on client if env vars are missing.
-      setState({
-        user: null,
-        loading: false,
-        error: e?.message || "Auth failed to initialize.",
-      });
-    }
-
-    return () => {
-      if (unsub) unsub();
-    };
-  }, []);
-
-  return state;
+  const ctx = useContext(AuthContext);
+  if (!ctx) {
+    throw new Error("useAuth must be used inside <Providers> (AuthContext.Provider).");
+  }
+  return ctx;
 }

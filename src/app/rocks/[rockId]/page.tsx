@@ -1,134 +1,129 @@
 "use client";
 
+// FILE: src/app/rocks/[rockId]/page.tsx
+
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
-import AppHeader from "@/components/AppHeader";
-import RockBuilder from "@/components/RockBuilder";
 import { useAuth } from "@/lib/useAuth";
-import { getRock, updateRock } from "@/lib/rocks";
+import { getRock, saveRock } from "@/lib/rocks";
 import type { Rock } from "@/types/rock";
+import RockBuilder from "@/components/RockBuilder";
 
 export default function RockDetailPage() {
   const router = useRouter();
   const params = useParams<{ rockId: string }>();
   const rockId = params?.rockId;
 
-  const { user, loading: authLoading, error: authError } = useAuth();
+  const { uid, loading } = useAuth();
 
   const [rock, setRock] = useState<Rock | null>(null);
-  const [busy, setBusy] = useState(false);
   const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [loadingRock, setLoadingRock] = useState(true);
 
-  const headerRight = useMemo(
-    () => ({
-      active: "none" as const,
-      showDashboard: true,
-      showLogout: true,
-    }),
-    []
-  );
-
+  // Auth gate
   useEffect(() => {
-    if (authLoading) return;
+    if (!loading && !uid) router.replace("/login");
+  }, [loading, uid, router]);
 
-    if (authError) {
-      setLoadErr(authError);
-      return;
-    }
-
-    if (!user) {
-      router.replace("/login");
-      return;
-    }
-
-    if (!rockId) {
-      setLoadErr("Missing Rock ID.");
-      return;
-    }
-
-    // Capture uid so TS knows it's non-null inside async code
-    const uid = user.uid;
-
+  // Load rock
+  useEffect(() => {
     let cancelled = false;
 
     async function run() {
-      setBusy(true);
+      if (!uid || !rockId) return;
+
+      setLoadingRock(true);
       setLoadErr(null);
+
       try {
-        const r = await getRock(uid, rockId);
+        const r = (await getRock(uid, rockId)) as Rock | null;
         if (!cancelled) setRock(r);
         if (!r && !cancelled) setLoadErr("Rock not found.");
       } catch (e: any) {
         if (!cancelled) setLoadErr(e?.message || "Failed to load Rock.");
       } finally {
-        if (!cancelled) setBusy(false);
+        if (!cancelled) setLoadingRock(false);
       }
     }
 
     run();
-
     return () => {
       cancelled = true;
     };
-  }, [authLoading, authError, user, rockId, router]);
+  }, [uid, rockId]);
 
-  async function handleSave(updated: Rock) {
-    if (!user) return;
-    const uid = user.uid;
+  const title = useMemo(() => {
+    if (loading) return "Checking sign-in…";
+    if (loadingRock) return "Loading Rock…";
+    if (loadErr) return loadErr;
+    return rock?.title || "Rock";
+  }, [loading, loadingRock, loadErr, rock?.title]);
 
-    // Patch the whole rock minus id
-    const { id, ...rest } = updated as any;
-    await updateRock(uid, updated.id, rest);
-    setRock(updated);
-  }
-
-  if (authError) {
+  if (loading || loadingRock) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100">
-        <AppHeader title="Smart Rocks" right={headerRight} />
-        <main className="mx-auto max-w-6xl px-6 py-10">
-          <div className="rounded-2xl border border-red-500/25 bg-red-500/10 p-5 text-red-100">
-            <div className="text-sm font-semibold">Auth error</div>
-            <div className="mt-1 text-sm opacity-90">{authError}</div>
-          </div>
-        </main>
-      </div>
+      <main className="mx-auto w-full max-w-6xl px-6 py-10">
+        <div className="text-slate-300">{title}</div>
+      </main>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <AppHeader title="Smart Rocks" right={headerRight} />
-
-      <main className="mx-auto max-w-6xl px-6 py-8">
-        {authLoading ? (
-          <div className="text-slate-400">Checking sign-in…</div>
-        ) : !user ? (
-          <div className="text-slate-400">Redirecting…</div>
-        ) : busy ? (
-          <div className="text-slate-400">Loading Rock…</div>
-        ) : loadErr ? (
-          <div className="rounded-2xl border border-red-500/25 bg-red-500/10 p-5 text-red-100">
-            <div className="text-sm font-semibold">Load error</div>
-            <div className="mt-1 text-sm opacity-90">{loadErr}</div>
-            <button
-              onClick={() => router.push("/dashboard")}
-              className="mt-4 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10"
-            >
-              Back to Dashboard
-            </button>
+  if (loadErr || !rock) {
+    return (
+      <main className="mx-auto w-full max-w-6xl px-6 py-10">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+          <div className="text-lg font-semibold text-slate-100">
+            {loadErr || "Rock not found."}
           </div>
-        ) : rock ? (
-          <RockBuilder
-            initialRock={rock}
-            onSave={handleSave}
-            onCancel={() => router.push("/dashboard")}
-          />
-        ) : (
-          <div className="text-slate-400">Rock not found.</div>
-        )}
+          <div className="mt-2 text-sm text-slate-300">
+            Go back to your Dashboard and try again.
+          </div>
+          <button
+            type="button"
+            onClick={() => router.push("/dashboard")}
+            className="mt-5 rounded-xl bg-orange-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-orange-400"
+          >
+            Back to Dashboard
+          </button>
+        </div>
       </main>
-    </div>
+    );
+  }
+
+  // ✅ Make uid a guaranteed string for any nested callbacks
+  if (!uid) return null;
+  const uidStr: string = uid;
+
+  async function handleSave(next: Rock) {
+    await saveRock(uidStr, next);
+    setRock(next);
+  }
+
+  return (
+    <main className="mx-auto w-full max-w-6xl px-6 py-10">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="space-y-2">
+          <div className="text-xs font-semibold tracking-widest text-slate-500">
+            ROCK
+          </div>
+          <h1 className="text-2xl font-extrabold tracking-tight sm:text-3xl">
+            {rock.title || "(Untitled Rock)"}
+          </h1>
+          <p className="max-w-2xl text-slate-300">
+            Work one step at a time. The next best action stays obvious.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => router.push("/dashboard")}
+          className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+        >
+          Back to Dashboard
+        </button>
+      </div>
+
+      <RockBuilder initialRock={rock} onSave={handleSave} />
+    </main>
   );
 }
