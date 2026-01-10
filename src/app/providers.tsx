@@ -1,14 +1,13 @@
-/* ============================================================
-   File: src/app/providers.tsx
-   Purpose:
-   - Client-side wrapper for app-wide providers (AuthProvider)
-   ============================================================ */
-
 "use client";
 
 import React from "react";
-import { AuthProvider } from "@/lib/auth";
 
+/**
+ * App-level client providers.
+ *
+ * We intentionally keep this lightweight.
+ * Auth is handled via useAuth() (listener-based) and does not require a context provider.
+ */
 export default function Providers({ children }: { children: React.ReactNode }) {
-  return <AuthProvider>{children}</AuthProvider>;
+  return <>{children}</>;
 }
