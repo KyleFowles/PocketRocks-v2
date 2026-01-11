@@ -134,7 +134,7 @@ export default function DashboardPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Link
             href="/rocks/new"
-            className="rounded-xl bg-orange-500 px-4 py-2 text-sm font-semibold text-slate-950 shadow-sm transition hover:bg-orange-400"
+            className="rounded-xl bg-orange-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-400"
           >
             + New Rock
           </Link>
@@ -249,7 +249,7 @@ export default function DashboardPage() {
 
                 <Link
                   href={`/rocks/${encodeURIComponent(filtered[0].id)}`}
-                  className="mt-4 inline-flex w-full items-center justify-center rounded-xl bg-orange-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-orange-400"
+                  className="mt-4 inline-flex w-full items-center justify-center rounded-xl bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-orange-400"
                 >
                   Continue →
                 </Link>

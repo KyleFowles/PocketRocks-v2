@@ -3,7 +3,20 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-type ReqBody = {
+/**
+ * This route supports BOTH request shapes:
+ *
+ * Legacy:
+ *   { title, draft, finalStatement, dueDate, status, count }
+ *
+ * New:
+ *   { rock: { ...RockFields }, context: { requested: number } }
+ *
+ * Response:
+ *   { ok: true, suggestions: string[] }
+ */
+
+type LegacyReqBody = {
   title?: string;
   draft?: string;
   finalStatement?: string;
@@ -11,6 +24,33 @@ type ReqBody = {
   status?: string;
   count?: number;
 };
+
+type NewReqBody = {
+  rock?: {
+    title?: string;
+    draft?: string;
+    finalStatement?: string;
+    dueDate?: string;
+    status?: string;
+
+    // Optional extra context fields
+    specific?: string;
+    measurable?: string;
+    achievable?: string;
+    relevant?: string;
+    timeBound?: string;
+
+    metrics?: Array<{ name?: string; target?: string; current?: string }>;
+    milestones?: Array<{ text?: string; dueDate?: string; completed?: boolean }>;
+  };
+  context?: {
+    requested?: number;
+    mode?: string;
+  };
+  count?: number; // allow top-level count too
+};
+
+type ReqBody = LegacyReqBody & NewReqBody;
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -25,6 +65,10 @@ function int(v: unknown, fallback: number) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function clampCount(n: number) {
+  return Math.min(6, Math.max(3, n));
+}
+
 export async function POST(req: Request) {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
@@ -32,13 +76,66 @@ export async function POST(req: Request) {
 
     const body = (await req.json()) as ReqBody;
 
-    const title = str(body.title).trim();
-    const draft = str(body.draft).trim();
-    const finalStatement = str(body.finalStatement).trim();
-    const dueDate = str(body.dueDate).trim();
-    const status = str(body.status).trim();
+    // Support both payloads
+    const rockFromNew = body?.rock ?? null;
 
-    const count = Math.min(6, Math.max(3, int(body.count, 4)));
+    const title = str(rockFromNew?.title ?? body.title).trim();
+    const draft = str(rockFromNew?.draft ?? body.draft).trim();
+    const finalStatement = str(rockFromNew?.finalStatement ?? body.finalStatement).trim();
+    const dueDate = str(rockFromNew?.dueDate ?? body.dueDate).trim();
+    const status = str(rockFromNew?.status ?? body.status).trim();
+
+    const count = clampCount(int(body?.context?.requested, int(body.count, 4)));
+
+    // Optional extra context for better results
+    const specific = str(rockFromNew?.specific).trim();
+    const measurable = str(rockFromNew?.measurable).trim();
+    const achievable = str(rockFromNew?.achievable).trim();
+    const relevant = str(rockFromNew?.relevant).trim();
+    const timeBound = str(rockFromNew?.timeBound).trim();
+
+    const metrics = Array.isArray(rockFromNew?.metrics) ? rockFromNew!.metrics! : [];
+    const milestones = Array.isArray(rockFromNew?.milestones) ? rockFromNew!.milestones! : [];
+
+    const metricsLine =
+      metrics.length > 0
+        ? `Metrics: ${metrics
+            .map((m) => {
+              const n = str(m?.name).trim();
+              const t = str(m?.target).trim();
+              const c = str(m?.current).trim();
+              if (!n && !t) return "";
+              return `${n || "Metric"} (Target: ${t || "—"}${c ? `, Current: ${c}` : ""})`;
+            })
+            .filter(Boolean)
+            .join("; ")}`
+        : "";
+
+    const milestonesLine =
+      milestones.length > 0
+        ? `Milestones: ${milestones
+            .map((m) => {
+              const text = str(m?.text).trim();
+              const dd = str(m?.dueDate).trim();
+              if (!text) return "";
+              return `${text}${dd ? ` (${dd})` : ""}`;
+            })
+            .filter(Boolean)
+            .join("; ")}`
+        : "";
+
+    const smartLine =
+      [specific, measurable, achievable, relevant, timeBound].some(Boolean)
+        ? [
+            specific ? `Specific: ${specific}` : "",
+            measurable ? `Measurable: ${measurable}` : "",
+            achievable ? `Achievable: ${achievable}` : "",
+            relevant ? `Relevant: ${relevant}` : "",
+            timeBound ? `Time-bound: ${timeBound}` : "",
+          ]
+            .filter(Boolean)
+            .join(" | ")
+        : "";
 
     const context = [
       title ? `Title: ${title}` : "",
@@ -46,16 +143,19 @@ export async function POST(req: Request) {
       dueDate ? `Due Date: ${dueDate}` : "",
       draft ? `Draft: ${draft}` : "",
       finalStatement ? `Current Final Statement: ${finalStatement}` : "",
+      smartLine ? `SMART: ${smartLine}` : "",
+      metricsLine ? metricsLine : "",
+      milestonesLine ? milestonesLine : "",
     ]
       .filter(Boolean)
       .join("\n");
 
     if (!context) {
-      return jsonError("No Rock context provided. Send at least title/draft/finalStatement.");
+      return jsonError("No Rock context provided. Send at least title/draft/finalStatement.", 400);
     }
 
     const prompt = `
-You help a user turn a Rock into a SMART Rock statement.
+You help a user turn a Rock into a SMART Rock final statement.
 
 Task:
 - Write ${count} improved Final Rock Statement options.

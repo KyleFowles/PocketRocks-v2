@@ -1,7 +1,46 @@
+/* ============================================================
+   FILE: src/app/globals.css
+
+   SCOPE:
+   Global styles for PocketRocks.
+
+   CHANGE (2026-01-10):
+   - Force consistent font smoothing for crisp, sharp text
+     (especially white text on saturated colors like orange)
+
+   NOTES:
+   - Safe for all browsers
+   - Improves macOS rendering most noticeably
+   - No layout or color changes
+   ============================================================ */
+
+/* Tailwind base layers */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-html, body {
-  height: 100%;
+/* ------------------------------------------------------------
+   Global font smoothing (CRITICAL FOR CRISP TEXT)
+------------------------------------------------------------- */
+
+html,
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Ensure interactive elements inherit smoothing */
+button,
+a {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ------------------------------------------------------------
+   Optional: Prevent blurry transforms on buttons
+------------------------------------------------------------- */
+
+button,
+a {
+  transform: translateZ(0);
 }

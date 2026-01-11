@@ -1,6 +1,6 @@
-// types/rock.ts
+// FILE: src/types/rock.ts
 
-export type RockStatus = "on_track" | "off_track";
+export type RockStatus = "on_track" | "off_track" | "done";
 
 export type Metric = {
   id: string;
@@ -12,42 +12,44 @@ export type Metric = {
 export type Milestone = {
   id: string;
   text: string;
-  dueDate?: string; // ISO date optional
+  dueDate?: string;
   completed: boolean;
 };
 
 export type WeeklyUpdate = {
   id: string;
-  weekDate: string; // ISO date
+  date: string; // YYYY-MM-DD
   status: RockStatus;
-  notes: string;
+  notes?: string;
 };
 
 export type Rock = {
   id: string;
+
   companyId: string;
   ownerId: string;
 
   title: string;
   finalStatement: string;
 
-  // SMART detail fields (stored directly for MVP simplicity)
   draft: string;
+
   specific: string;
   measurable: string;
   achievable: string;
   relevant: string;
   timeBound: string;
 
-  dueDate: string; // ISO date (YYYY-MM-DD)
+  dueDate: string; // YYYY-MM-DD
   status: RockStatus;
 
   metrics: Metric[];
   milestones: Milestone[];
 
-  // optional (we’ll add weekly updates later)
   weeklyUpdates?: WeeklyUpdate[];
 
-  updatedAt?: any;
   createdAt?: any;
+  updatedAt?: any;
+
+  // NOTE: archived is intentionally not part of the type.
 };
