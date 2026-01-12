@@ -2,8 +2,14 @@
    FILE: src/app/layout.tsx
 
    SCOPE:
-   Root layout for app router.
-   - Ensures globals.css is loaded globally.
+   Root layout for the App Router.
+   - Explicitly imports globals.css
+   - Guarantees Tailwind + global CSS are applied
+   - Wraps the entire app in Providers (AuthContext safe)
+   - Establishes the canonical dark base + crisp text rendering
+
+   THIS FILE IS FOUNDATIONAL.
+   If this file is wrong, the entire app becomes unstable.
    ============================================================ */
 
 import "./globals.css";
@@ -18,7 +24,14 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>
+      <body
+        className="
+          min-h-dvh
+          bg-transparent
+          text-white
+          antialiased
+        "
+      >
         <Providers>{children}</Providers>
       </body>
     </html>

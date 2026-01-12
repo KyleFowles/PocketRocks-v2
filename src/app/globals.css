@@ -2,28 +2,207 @@
    FILE: src/app/globals.css
 
    SCOPE:
-   Global styling + Tailwind directives.
-   - Tailwind v4 compatible
-   - Provides PocketRocks dark base look
+   Global styling for PocketRocks
+   - Crisp white text hierarchy
+   - Clear panel contrast
+   - Docked footer bar (always visible)
    ============================================================ */
 
 @import "tailwindcss";
 
 :root {
   color-scheme: dark;
+
+  /* Backgrounds */
+  --pr-bg: #0b1220;
+  --pr-bg-2: #08101d;
+
+  /* TEXT HIERARCHY */
+  --pr-white: #ffffff;
+  --pr-text: #f5f7fa;
+  --pr-muted: #b6c0d1;
+  --pr-muted-soft: #9aa6bb;
+
+  /* Borders */
+  --pr-border: rgba(229, 232, 235, 0.14);
+  --pr-border-strong: rgba(229, 232, 235, 0.22);
+
+  /* Brand */
+  --pr-orange: #ff7900;         /* header */
+  --pr-orange-cta: #f04e23;     /* button base */
+  --pr-orange-cta-hover: #ff7900;
+
+  /* Focus */
+  --pr-focus: rgba(255, 121, 0, 0.45);
 }
 
 html,
 body {
-  height: 100%;
+  background-color: var(--pr-bg);
+  color: var(--pr-text);
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-body {
-  margin: 0;
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji",
-    "Segoe UI Emoji";
-  background: radial-gradient(1200px 600px at 20% 0%, rgba(255, 121, 0, 0.14), rgba(0, 0, 0, 0) 55%),
-    radial-gradient(900px 500px at 80% 10%, rgba(20, 34, 51, 0.55), rgba(0, 0, 0, 0) 60%),
-    linear-gradient(180deg, #0b1220 0%, #050810 100%);
-  color: rgba(255, 255, 255, 0.92);
+/* -------------------------
+   Header Accent
+------------------------- */
+.pr-header-accent {
+  color: var(--pr-orange);
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+
+/* -------------------------
+   Page Backdrop
+------------------------- */
+.pr-page {
+  min-height: 100vh;
+  background:
+    radial-gradient(900px 400px at 50% 0%, rgba(255, 121, 0, 0.10), transparent 60%),
+    radial-gradient(800px 500px at 10% 30%, rgba(68, 87, 119, 0.18), transparent 55%),
+    radial-gradient(700px 500px at 90% 55%, rgba(20, 34, 51, 0.55), transparent 60%),
+    linear-gradient(180deg, var(--pr-bg-2), var(--pr-bg));
+}
+
+/* -------------------------
+   Panel / Card
+------------------------- */
+.pr-panel {
+  background: linear-gradient(180deg, rgba(19, 35, 66, 0.78), rgba(15, 26, 47, 0.74));
+  border: 1px solid var(--pr-border-strong);
+  border-radius: 18px;
+  box-shadow:
+    0 18px 60px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(10px);
+}
+
+/* -------------------------
+   Labels
+------------------------- */
+.pr-label {
+  color: var(--pr-muted);
+  font-size: 13px;
+  letter-spacing: 0.3px;
+}
+
+/* -------------------------
+   Textareas (crisp white)
+------------------------- */
+.pr-textarea {
+  width: 100%;
+  resize: vertical;
+
+  background: rgba(6, 10, 18, 0.65);
+  border: 1px solid var(--pr-border);
+  border-radius: 14px;
+
+  color: var(--pr-white);
+  padding: 14px;
+
+  outline: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.pr-textarea:focus {
+  border-color: rgba(255, 121, 0, 0.55);
+  box-shadow:
+    0 0 0 4px var(--pr-focus),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.pr-textarea::placeholder {
+  color: var(--pr-muted-soft);
+}
+
+/* -------------------------
+   Alerts
+------------------------- */
+.pr-alert {
+  color: #ffd7c2;
+  font-size: 13px;
+}
+
+/* -------------------------
+   Primary CTA Button
+------------------------- */
+.pr-primary-button {
+  background-color: var(--pr-orange-cta);
+  color: var(--pr-white);
+
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1;
+
+  padding: 14px 26px;
+  border-radius: 12px;
+
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  outline: none;
+
+  cursor: pointer;
+
+  box-shadow:
+    0 10px 26px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
+
+  transition:
+    background-color 0.15s ease,
+    transform 0.05s ease,
+    box-shadow 0.15s ease;
+}
+
+.pr-primary-button:hover {
+  background-color: var(--pr-orange-cta-hover);
+}
+
+.pr-primary-button:active {
+  transform: translateY(1px);
+}
+
+.pr-primary-button:focus-visible {
+  box-shadow:
+    0 0 0 4px var(--pr-focus),
+    0 14px 34px rgba(0, 0, 0, 0.52),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.pr-primary-button:disabled {
+  background-color: #7a3a1e;
+  border-color: rgba(255, 255, 255, 0.08);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* -------------------------
+   Docked Footer (always visible)
+------------------------- */
+.pr-footer-dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+
+  padding: 14px 18px;
+
+  background: linear-gradient(
+    180deg,
+    rgba(8, 16, 29, 0.35),
+    rgba(8, 16, 29, 0.88)
+  );
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
+  backdrop-filter: blur(10px);
+}
+
+.pr-footer-inner {
+  max-width: 980px;
+  margin: 0 auto;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
 }
