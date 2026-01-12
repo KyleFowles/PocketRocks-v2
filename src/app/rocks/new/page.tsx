@@ -37,12 +37,13 @@ import type { Rock } from "@/types/rock";
 type Mode = "draft" | "improve";
 
 function makeId(): string {
-  try {
-    // @ts-expect-error - crypto exists in browsers
-    if (crypto?.randomUUID) return crypto.randomUUID();
-  } catch {
-    // ignore
+  // Browser: prefer UUID
+  if (typeof window !== "undefined" && typeof globalThis.crypto !== "undefined") {
+    const c = globalThis.crypto as Crypto;
+    if (typeof c.randomUUID === "function") return c.randomUUID();
   }
+
+  // Fallback: time + random
   return `rock_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 

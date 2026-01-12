@@ -4,93 +4,40 @@
    FILE: src/app/rocks/[rockId]/page.tsx
 
    SCOPE:
-   Rock Detail page (Draft + Improve) with persistence + AI.
-
-   BUILD FIX (Vercel):
-   - Remove dependency on "@/components/rock/RockModes" which is
-     failing module resolution in Vercel (Linux case-sensitive).
-   - Inline the needed types + helpers:
-       * RockMode
-       * ImproveSuggestion
-       * makeSuggestionId()
-       * normalizeSuggestionText()
-
-   SAVE SIGNATURE:
-   - This project’s saveRock expects 2 args:
-       saveRock(rockId, rock)
+   Rock Detail page aligned to the mobile-first UX pattern:
+   - DraftMode is input-only (no saving/continue props)
+   - StickyBottomBar owns the primary CTA (Continue / Apply)
+   - Continue is always visible on iPhone
+   - saveRock signature: saveRock(rockId, rock)
 
    ASSUMES:
+   - DraftMode: "@/components/rock/DraftMode" (input-only)
+   - ImproveMode: "@/components/rock/ImproveMode"
+   - StickyBottomBar: "@/components/rock/StickyBottomBar"
+   - CollapsedHeader: "@/components/rock/CollapsedHeader"
+   - useAuth: "@/lib/useAuth"
    - getRock(uid, rockId) exists
    - saveRock(rockId, rock) exists
-   - DraftMode / ImproveMode / CollapsedHeader exist
-   - /api/rock-suggest exists
+   - /api/rock-suggest endpoint exists
    ============================================================ */
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import React, { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 
 import CollapsedHeader from "@/components/rock/CollapsedHeader";
 import DraftMode from "@/components/rock/DraftMode";
-import ImproveMode from "@/components/rock/ImproveMode";
+import ImproveMode, { type ImproveSuggestion } from "@/components/rock/ImproveMode";
+import StickyBottomBar from "@/components/rock/StickyBottomBar";
 
 import { useAuth } from "@/lib/useAuth";
 import { getRock, saveRock } from "@/lib/rocks";
 import type { Rock } from "@/types/rock";
 
-/* -----------------------------
-   Inline shared types/helpers
------------------------------- */
-
-type RockMode = "draft" | "improve";
-
-export type ImproveSuggestion = {
-  id: string;
-  text: string;
-  recommended?: boolean;
-};
-
-function makeSuggestionId(prefix: string = "s"): string {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const c: any = globalThis as any;
-    if (c?.crypto?.randomUUID) return `${prefix}_${c.crypto.randomUUID()}`;
-  } catch {
-    // ignore
-  }
-  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-}
-
-function normalizeSuggestionText(input: unknown): string {
-  if (typeof input !== "string") return "";
-  let s = input.trim();
-
-  // remove wrapping quotes
-  if (
-    (s.startsWith('"') && s.endsWith('"')) ||
-    (s.startsWith("'") && s.endsWith("'")) ||
-    (s.startsWith("“") && s.endsWith("”"))
-  ) {
-    s = s.slice(1, -1).trim();
-  }
-
-  // strip common bullets / numbering
-  s = s.replace(/^[-*•]\s+/, "");
-  s = s.replace(/^\d+\.\s+/, "");
-
-  // collapse whitespace
-  s = s.replace(/\s+/g, " ").trim();
-  return s;
-}
+type Mode = "draft" | "improve";
 
 /* -----------------------------
-   Suggest API parsing
+   Suggestion fetch
 ------------------------------ */
-
-type SuggestApiResponse =
-  | { suggestions?: string[] }
-  | { suggestion?: string }
-  | { text?: string }
-  | unknown;
 
 async function fetchSuggestion(text: string): Promise<string> {
   const res = await fetch("/api/rock-suggest", {
@@ -99,33 +46,30 @@ async function fetchSuggestion(text: string): Promise<string> {
     body: JSON.stringify({ text }),
   });
   if (!res.ok) throw new Error("suggest_failed");
-
-  const data: SuggestApiResponse = await res.json();
+  const data = await res.json();
 
   const first =
-    (Array.isArray((data as any)?.suggestions) ? (data as any).suggestions[0] : null) ??
-    (typeof (data as any)?.suggestion === "string" ? (data as any).suggestion : null) ??
-    (typeof (data as any)?.text === "string" ? (data as any).text : null);
+    (Array.isArray(data?.suggestions) ? data.suggestions[0] : null) ??
+    (typeof data?.suggestion === "string" ? data.suggestion : null) ??
+    (typeof data?.text === "string" ? data.text : null);
 
-  const cleaned = normalizeSuggestionText(first);
+  const cleaned = typeof first === "string" ? first.trim() : "";
   if (!cleaned) throw new Error("empty_suggestion");
   return cleaned;
 }
 
-/* -----------------------------
-   Page
------------------------------- */
-
 export default function RockDetailPage() {
+  const router = useRouter();
   const params = useParams<{ rockId: string }>();
   const rockId = params?.rockId;
 
   const { uid, loading } = useAuth();
 
-  const [rock, setRock] = useState<Rock | null>(null);
-  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [mode, setMode] = useState<Mode>("draft");
 
-  const [mode, setMode] = useState<RockMode>("draft");
+  const [rock, setRock] = useState<Rock | null>(null);
+  const [loadingRock, setLoadingRock] = useState(true);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
@@ -134,26 +78,27 @@ export default function RockDetailPage() {
   const [loadingSuggestion, setLoadingSuggestion] = useState(false);
   const [suggestionError, setSuggestionError] = useState<string | null>(null);
 
-  // serialize saves
-  const inflightSaveRef = useRef<Promise<void> | null>(null);
-
-  const title = (rock as any)?.title ?? "";
-  const statement = (rock as any)?.statement ?? (rock as any)?.finalStatement ?? "";
-
+  /* -----------------------------
+     Load
+  ------------------------------ */
   useEffect(() => {
     if (!uid || !rockId) return;
 
     let cancelled = false;
 
     (async () => {
+      setLoadingRock(true);
+      setLoadErr(null);
       try {
-        setLoadErr(null);
         const r = await getRock(uid, rockId);
         if (cancelled) return;
-        setRock(r);
+        setRock(r as Rock);
       } catch {
         if (cancelled) return;
         setLoadErr("Could not load this Rock.");
+      } finally {
+        if (cancelled) return;
+        setLoadingRock(false);
       }
     })();
 
@@ -162,45 +107,44 @@ export default function RockDetailPage() {
     };
   }, [uid, rockId]);
 
-  async function saveNow(nextRock?: Rock): Promise<void> {
-    if (!rockId) return;
-    const toSave = nextRock ?? rock;
-    if (!toSave) return;
+  const title = (rock as any)?.title ?? "";
+  const statement = (rock as any)?.statement ?? (rock as any)?.finalStatement ?? "";
+  const canContinue = statement.trim().length > 0;
 
-    // serialize
-    if (inflightSaveRef.current) await inflightSaveRef.current;
+  /* -----------------------------
+     Save
+  ------------------------------ */
+  async function saveNow(nextRock?: Rock) {
+    if (!rockId || !rock) return;
+    const toSave = nextRock ?? rock;
 
     setSaving(true);
-    const p = (async () => {
-      try {
-        await saveRock(rockId, toSave);
-        setLastSavedAt(Date.now());
-      } finally {
-        setSaving(false);
-      }
-    })();
-
-    inflightSaveRef.current = p;
-    await p;
-    inflightSaveRef.current = null;
+    try {
+      await saveRock(rockId, toSave);
+      setLastSavedAt(Date.now());
+    } finally {
+      setSaving(false);
+    }
   }
 
+  /* -----------------------------
+     Enter Improve (auto-generate)
+  ------------------------------ */
   async function enterImprove() {
+    if (!rock) return;
+
+    await saveNow(rock);
+
+    const txt = statement.trim();
+    if (!txt) return;
+
     setMode("improve");
-
-    const txt = statement?.trim();
-    if (!txt) {
-      setSuggestion(null);
-      setSuggestionError("Write a draft first.");
-      return;
-    }
-
     setLoadingSuggestion(true);
     setSuggestionError(null);
 
     try {
       const s = await fetchSuggestion(txt);
-      setSuggestion({ id: makeSuggestionId("rec"), text: s, recommended: true });
+      setSuggestion({ id: "rec", text: s, recommended: true });
     } catch {
       setSuggestion(null);
       setSuggestionError("Could not generate a suggestion.");
@@ -210,7 +154,7 @@ export default function RockDetailPage() {
   }
 
   async function requestAnother() {
-    const txt = statement?.trim();
+    const txt = statement.trim();
     if (!txt) return;
 
     setLoadingSuggestion(true);
@@ -218,7 +162,7 @@ export default function RockDetailPage() {
 
     try {
       const s = await fetchSuggestion(txt);
-      setSuggestion({ id: makeSuggestionId("s"), text: s });
+      setSuggestion({ id: String(Date.now()), text: s });
     } catch {
       setSuggestionError("Could not generate a suggestion.");
     } finally {
@@ -243,6 +187,9 @@ export default function RockDetailPage() {
     await saveNow(nextRock as Rock);
   }
 
+  /* -----------------------------
+     States
+  ------------------------------ */
   if (loading) {
     return <div className="min-h-[60vh] flex items-center justify-center text-white/70">Loading…</div>;
   }
@@ -252,63 +199,99 @@ export default function RockDetailPage() {
       <div className="min-h-[60vh] flex items-center justify-center px-6">
         <div className="max-w-md w-full rounded-2xl border border-white/10 bg-white/5 p-5">
           <div className="text-white font-semibold mb-2">Please sign in</div>
-          <div className="text-white/70 text-sm">You need an account to view Rocks.</div>
+          <div className="text-white/70 text-sm mb-4">You need an account to view Rocks.</div>
+          <button
+            className="inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold text-white bg-[#FF7900]"
+            onClick={() => router.push("/login")}
+          >
+            Go to Login
+          </button>
         </div>
       </div>
     );
   }
 
-  if (loadErr) {
+  if (loadingRock) {
+    return <div className="min-h-[60vh] flex items-center justify-center text-white/70">Loading Rock…</div>;
+  }
+
+  if (loadErr || !rock) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center px-6">
         <div className="max-w-md w-full rounded-2xl border border-white/10 bg-white/5 p-5">
-          <div className="text-white font-semibold mb-2">Error</div>
-          <div className="text-white/70 text-sm">{loadErr}</div>
+          <div className="text-white font-semibold mb-2">Not available</div>
+          <div className="text-white/70 text-sm mb-4">{loadErr ?? "Could not load this Rock."}</div>
+          <button
+            className="inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold text-white bg-white/10 hover:bg-white/15"
+            onClick={() => router.push("/dashboard")}
+          >
+            Back to Dashboard
+          </button>
         </div>
       </div>
     );
-  }
-
-  if (!rock) {
-    return <div className="min-h-[60vh] flex items-center justify-center text-white/70">Loading Rock…</div>;
   }
 
   return (
     <div className="w-full">
       <CollapsedHeader
-        titleLeft="Rock"
-        titleRight={mode === "draft" ? "Draft" : "Improve"}
-        rightSlot={lastSavedAt ? <span className="text-white/55">Saved</span> : null}
+        centerText={mode === "draft" ? "Rock · Draft" : "Rock · Improve"}
+        rightSlot={lastSavedAt ? <span>Saved</span> : null}
       />
 
       {mode === "draft" ? (
-        <DraftMode
-          draft={statement}
-          title={title}
-          saving={saving}
-          lastSavedAt={lastSavedAt}
-          onChangeDraft={(next) => {
-            setRock((prev: any) => {
-              if (!prev) return prev;
-              const hasStatement = Object.prototype.hasOwnProperty.call(prev, "statement");
-              return hasStatement ? { ...prev, statement: next } : { ...prev, finalStatement: next };
-            });
-          }}
-          onChangeTitle={(next) => setRock((prev: any) => (prev ? { ...prev, title: next } : prev))}
-          onSaveNow={async () => saveNow()}
-          onContinue={enterImprove}
-        />
+        <>
+          <DraftMode
+            title={title}
+            draft={statement}
+            onChangeTitle={(next) =>
+              setRock((prev: any) => (prev ? { ...prev, title: next, updatedAt: Date.now() } : prev))
+            }
+            onChangeDraft={(next) =>
+              setRock((prev: any) => {
+                if (!prev) return prev;
+                const hasStatement = Object.prototype.hasOwnProperty.call(prev, "statement");
+                const base = { ...prev, updatedAt: Date.now() };
+                return hasStatement ? { ...base, statement: next } : { ...base, finalStatement: next };
+              })
+            }
+          />
+
+          <StickyBottomBar
+            progressLabel="Draft"
+            stepText="Step 1 of 5"
+            primaryAction={{
+              label: saving ? "Saving…" : "Continue",
+              disabled: !canContinue || saving,
+              onClick: enterImprove,
+            }}
+          />
+        </>
       ) : (
-        <ImproveMode
-          draftText={statement}
-          rockTitle={title}
-          suggestion={suggestion as any}
-          loadingSuggestion={loadingSuggestion}
-          suggestionError={suggestionError}
-          onRequestAnother={requestAnother}
-          onApplySuggestion={applySuggestion}
-          onBackToDraft={() => setMode("draft")}
-        />
+        <>
+          <ImproveMode
+            draftText={statement}
+            rockTitle={title}
+            suggestion={suggestion}
+            loadingSuggestion={loadingSuggestion}
+            suggestionError={suggestionError}
+            onRequestAnother={requestAnother}
+            onApplySuggestion={applySuggestion}
+            onBackToDraft={() => setMode("draft")}
+          />
+
+          <StickyBottomBar
+            progressLabel="Improve"
+            stepText="Step 2 of 5"
+            primaryAction={{
+              label: suggestion ? "Apply" : "Loading…",
+              disabled: loadingSuggestion || !suggestion,
+              onClick: () => {
+                if (suggestion) applySuggestion(suggestion.text);
+              },
+            }}
+          />
+        </>
       )}
     </div>
   );
