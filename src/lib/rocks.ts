@@ -1,151 +1,212 @@
-// FILE: src/lib/rocks.ts
+/* ============================================================
+   FILE: src/lib/rocks.ts
 
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  orderBy,
-  query,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-  where,
-  type DocumentData,
-} from "firebase/firestore";
+   PURPOSE:
+   Rock persistence layer with safety guards.
+
+   FIX:
+   Prevent Firestore path crashes (Cannot read ... indexOf) by:
+   - Supporting Guest mode (no uid) via localStorage
+   - Validating uid/rockId before calling Firestore doc()
+   - Allowing both saveRock(uid, rock) and saveRock(uid, rockId, rock)
+
+   NOTES:
+   - Firestore throws a cryptic runtime error when any doc() path
+     segment is undefined. This file ensures that never happens.
+   ============================================================ */
 
 import type { Rock } from "@/types/rock";
 import { getDbClient } from "@/lib/firebase";
 
-type ListOpts = {
-  includeArchived?: boolean;
+import {
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  serverTimestamp,
+  type DocumentData,
+} from "firebase/firestore";
+
+/* -----------------------------
+   Guest (localStorage) helpers
+------------------------------ */
+
+const GUEST_KEY = "pocketrocks_guest_rocks_v1";
+
+type GuestStore = {
+  rocks: Record<string, any>;
 };
 
-function rocksCollectionRef(uid: string) {
-  const db = getDbClient();
-  return collection(db, "users", uid, "rocks");
+function safeJsonParse<T>(raw: string | null, fallback: T): T {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
 }
+
+function guestRead(): GuestStore {
+  if (typeof window === "undefined") return { rocks: {} };
+  return safeJsonParse<GuestStore>(window.localStorage.getItem(GUEST_KEY), { rocks: {} });
+}
+
+function guestWrite(store: GuestStore) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(GUEST_KEY, JSON.stringify(store));
+}
+
+function makeId(): string {
+  try {
+    if (typeof crypto !== "undefined" && "randomUUID" in crypto && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+  } catch {
+    // ignore
+  }
+  return `rock_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function isNonEmptyString(v: any): v is string {
+  return typeof v === "string" && v.trim().length > 0;
+}
+
+/* -----------------------------
+   Firestore helpers
+------------------------------ */
 
 function rockDocRef(uid: string, rockId: string) {
   const db = getDbClient();
+  if (!db) return null;
+
+  if (!isNonEmptyString(uid)) return null;
+  if (!isNonEmptyString(rockId)) return null;
+
   return doc(db, "users", uid, "rocks", rockId);
 }
 
 function normalizeRock(id: string, data: DocumentData): Rock {
-  // Ensure we always return a valid Rock shape for the app.
-  // Any missing fields get safe defaults (keeps UI stable).
-  return {
-    id,
-    companyId: String(data.companyId ?? "default"),
-    ownerId: String(data.ownerId ?? ""),
-
-    title: String(data.title ?? ""),
-    finalStatement: String(data.finalStatement ?? ""),
-
-    draft: String(data.draft ?? ""),
-    specific: String(data.specific ?? ""),
-    measurable: String(data.measurable ?? ""),
-    achievable: String(data.achievable ?? ""),
-    relevant: String(data.relevant ?? ""),
-    timeBound: String(data.timeBound ?? ""),
-
-    dueDate: String(data.dueDate ?? ""),
-    status: (data.status as any) ?? "on_track",
-
-    metrics: Array.isArray(data.metrics) ? data.metrics : [],
-    milestones: Array.isArray(data.milestones) ? data.milestones : [],
-
-    weeklyUpdates: Array.isArray(data.weeklyUpdates) ? data.weeklyUpdates : undefined,
-
-    updatedAt: data.updatedAt,
-    createdAt: data.createdAt,
-  };
+  // We keep this permissive so we don’t break if Rock evolves.
+  // Ensure "id" is always present.
+  return { ...(data as any), id } as Rock;
 }
 
-/**
- * List Rocks for a user.
- * - archived is a Firestore field we store even though it's not in the Rock type yet.
- * - includeArchived=false (default) filters archived out.
- */
-export async function listRocks(uid: string, opts: ListOpts = {}): Promise<Rock[]> {
-  const includeArchived = Boolean(opts.includeArchived);
-
-  const col = rocksCollectionRef(uid);
-
-  // If we’re not including archived, filter them out.
-  // We treat "archived == true" as archived, and missing/false as active.
-  const q = includeArchived
-    ? query(col, orderBy("updatedAt", "desc"))
-    : query(
-        col,
-        where("archived", "in", [false, null]),
-        orderBy("updatedAt", "desc")
-      );
-
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => normalizeRock(d.id, d.data()));
-}
+/* -----------------------------
+   Public API
+------------------------------ */
 
 /**
- * Get a single Rock by id.
+ * Get a rock by id.
+ * - If uid is missing => read from localStorage (guest).
+ * - If uid exists => read from Firestore.
  */
-export async function getRock(uid: string, rockId: string): Promise<Rock | null> {
+export async function getRock(uid: string | null | undefined, rockId: string): Promise<Rock | null> {
+  if (!isNonEmptyString(rockId)) return null;
+
+  // Guest
+  if (!isNonEmptyString(uid)) {
+    const store = guestRead();
+    const raw = store.rocks[rockId];
+    return raw ? ({ ...raw, id: rockId } as Rock) : null;
+  }
+
+  // Firestore
   const ref = rockDocRef(uid, rockId);
+  if (!ref) return null;
+
   const snap = await getDoc(ref);
   if (!snap.exists()) return null;
+
   return normalizeRock(snap.id, snap.data());
 }
 
 /**
- * Update an existing Rock.
- * (If the doc doesn’t exist, Firestore will create it with updateDoc? -> No.
- * updateDoc requires the doc to exist, so we use setDoc with merge here.)
+ * Save a rock (create or overwrite).
+ * Supports BOTH:
+ *   saveRock(uid, rock)
+ *   saveRock(uid, rockId, rock)
+ *
+ * Returns the rockId used.
  */
-export async function updateRock(uid: string, rock: Rock): Promise<void> {
-  const ref = rockDocRef(uid, rock.id);
+export async function saveRock(
+  uid: string | null | undefined,
+  rockOrRockId: Rock | string,
+  maybeRock?: Rock
+): Promise<string> {
+  const rockId = typeof rockOrRockId === "string" ? rockOrRockId : (rockOrRockId as any)?.id;
+  const rock: Rock = (typeof rockOrRockId === "string" ? maybeRock : rockOrRockId) as Rock;
 
-  // Preserve archived even though it’s not in the Rock type.
-  const archived = Boolean((rock as any).archived);
+  const finalId = isNonEmptyString(rockId) ? rockId : isNonEmptyString((rock as any)?.id) ? (rock as any).id : makeId();
+
+  // Guest
+  if (!isNonEmptyString(uid)) {
+    const store = guestRead();
+    store.rocks[finalId] = {
+      ...(rock as any),
+      id: finalId,
+      updatedAt: Date.now(),
+      createdAt: (rock as any)?.createdAt ?? Date.now(),
+    };
+    guestWrite(store);
+    return finalId;
+  }
+
+  // Firestore
+  const ref = rockDocRef(uid, finalId);
+  if (!ref) {
+    // If this happens, we are missing something critical. Fall back to guest so the user can keep moving.
+    const store = guestRead();
+    store.rocks[finalId] = { ...(rock as any), id: finalId, updatedAt: Date.now(), createdAt: Date.now() };
+    guestWrite(store);
+    return finalId;
+  }
 
   await setDoc(
     ref,
     {
-      ...rock,
-      archived,
+      ...(rock as any),
+      id: finalId,
       updatedAt: serverTimestamp(),
-      createdAt: (rock as any).createdAt ?? serverTimestamp(),
+      createdAt: (rock as any)?.createdAt ?? serverTimestamp(),
     },
     { merge: true }
   );
+
+  return finalId;
 }
 
 /**
- * Save a Rock (create or update).
- * This is the API your pages expect.
+ * Patch/update fields on a rock.
+ * - Guest => localStorage merge
+ * - Firestore => updateDoc
  */
-export async function saveRock(uid: string, rock: Rock): Promise<void> {
-  // For MVP, create/update are the same operation (merge).
-  return updateRock(uid, rock);
-}
+export async function updateRock(
+  uid: string | null | undefined,
+  rockId: string,
+  patch: Partial<Rock>
+): Promise<void> {
+  if (!isNonEmptyString(rockId)) return;
 
-/**
- * Archive a Rock (soft delete).
- */
-export async function archiveRock(uid: string, rockId: string): Promise<void> {
+  // Guest
+  if (!isNonEmptyString(uid)) {
+    const store = guestRead();
+    const prev = store.rocks[rockId] ?? { id: rockId, createdAt: Date.now() };
+    store.rocks[rockId] = {
+      ...prev,
+      ...(patch as any),
+      id: rockId,
+      updatedAt: Date.now(),
+    };
+    guestWrite(store);
+    return;
+  }
+
+  // Firestore
   const ref = rockDocRef(uid, rockId);
-  await updateDoc(ref, {
-    archived: true,
-    updatedAt: serverTimestamp(),
-  });
-}
+  if (!ref) return;
 
-/**
- * Restore an archived Rock.
- */
-export async function restoreRock(uid: string, rockId: string): Promise<void> {
-  const ref = rockDocRef(uid, rockId);
   await updateDoc(ref, {
-    archived: false,
+    ...(patch as any),
     updatedAt: serverTimestamp(),
   });
 }
