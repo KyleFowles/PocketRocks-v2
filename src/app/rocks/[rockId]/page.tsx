@@ -1,41 +1,96 @@
+"use client";
+
 /* ============================================================
    FILE: src/app/rocks/[rockId]/page.tsx
 
-   SCOPE (THIS CHANGE):
-   Replace the cluttered "everything-at-once" UX with a strict
-   Draft -> Improve flow that matches the PocketRocks UX contract.
+   SCOPE:
+   Rock Detail page (Draft + Improve) with persistence + AI.
 
-   CONTRACT ENFORCEMENT:
-   - Draft mode: writing only (one primary action: Continue)
-   - Improve mode: AI suggestion only (one primary action: Apply)
-   - Progressive disclosure: AI only in Improve
-   - Mobile-first: single-column, calm layout
+   BUILD FIX (Vercel):
+   - Remove dependency on "@/components/rock/RockModes" which is
+     failing module resolution in Vercel (Linux case-sensitive).
+   - Inline the needed types + helpers:
+       * RockMode
+       * ImproveSuggestion
+       * makeSuggestionId()
+       * normalizeSuggestionText()
 
-   ASSUMPTIONS (based on your existing code):
-   - useAuth exists at "@/lib/useAuth"
-   - getRock/saveRock exist at "@/lib/rocks"
-   - /api/rock-suggest exists and can accept JSON { text: string }
+   SAVE SIGNATURE:
+   - This project’s saveRock expects 2 args:
+       saveRock(rockId, rock)
+
+   ASSUMES:
+   - getRock(uid, rockId) exists
+   - saveRock(rockId, rock) exists
+   - DraftMode / ImproveMode / CollapsedHeader exist
+   - /api/rock-suggest exists
    ============================================================ */
 
-"use client";
-
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
+
+import CollapsedHeader from "@/components/rock/CollapsedHeader";
+import DraftMode from "@/components/rock/DraftMode";
+import ImproveMode from "@/components/rock/ImproveMode";
 
 import { useAuth } from "@/lib/useAuth";
 import { getRock, saveRock } from "@/lib/rocks";
 import type { Rock } from "@/types/rock";
 
-import DraftMode from "@/components/rock/DraftMode";
-import ImproveMode from "@/components/rock/ImproveMode";
-import type { ImproveSuggestion, RockMode } from "@/components/rock/RockModes";
-import { makeSuggestionId, normalizeSuggestionText } from "@/components/rock/RockModes";
+/* -----------------------------
+   Inline shared types/helpers
+------------------------------ */
+
+type RockMode = "draft" | "improve";
+
+export type ImproveSuggestion = {
+  id: string;
+  text: string;
+  recommended?: boolean;
+};
+
+function makeSuggestionId(prefix: string = "s"): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const c: any = globalThis as any;
+    if (c?.crypto?.randomUUID) return `${prefix}_${c.crypto.randomUUID()}`;
+  } catch {
+    // ignore
+  }
+  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function normalizeSuggestionText(input: unknown): string {
+  if (typeof input !== "string") return "";
+  let s = input.trim();
+
+  // remove wrapping quotes
+  if (
+    (s.startsWith('"') && s.endsWith('"')) ||
+    (s.startsWith("'") && s.endsWith("'")) ||
+    (s.startsWith("“") && s.endsWith("”"))
+  ) {
+    s = s.slice(1, -1).trim();
+  }
+
+  // strip common bullets / numbering
+  s = s.replace(/^[-*•]\s+/, "");
+  s = s.replace(/^\d+\.\s+/, "");
+
+  // collapse whitespace
+  s = s.replace(/\s+/g, " ").trim();
+  return s;
+}
+
+/* -----------------------------
+   Suggest API parsing
+------------------------------ */
 
 type SuggestApiResponse =
   | { suggestions?: string[] }
   | { suggestion?: string }
   | { text?: string }
-  | any;
+  | unknown;
 
 async function fetchSuggestion(text: string): Promise<string> {
   const res = await fetch("/api/rock-suggest", {
@@ -43,103 +98,100 @@ async function fetchSuggestion(text: string): Promise<string> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),
   });
-
-  if (!res.ok) {
-    throw new Error(`Suggestion request failed: ${res.status}`);
-  }
+  if (!res.ok) throw new Error("suggest_failed");
 
   const data: SuggestApiResponse = await res.json();
 
-  // Accept a few common shapes to avoid brittle coupling
   const first =
-    (Array.isArray(data?.suggestions) ? data.suggestions[0] : null) ??
-    (typeof data?.suggestion === "string" ? data.suggestion : null) ??
-    (typeof data?.text === "string" ? data.text : null);
+    (Array.isArray((data as any)?.suggestions) ? (data as any).suggestions[0] : null) ??
+    (typeof (data as any)?.suggestion === "string" ? (data as any).suggestion : null) ??
+    (typeof (data as any)?.text === "string" ? (data as any).text : null);
 
   const cleaned = normalizeSuggestionText(first);
-  if (!cleaned) throw new Error("Empty suggestion");
+  if (!cleaned) throw new Error("empty_suggestion");
   return cleaned;
 }
 
+/* -----------------------------
+   Page
+------------------------------ */
+
 export default function RockDetailPage() {
-  const router = useRouter();
   const params = useParams<{ rockId: string }>();
   const rockId = params?.rockId;
 
   const { uid, loading } = useAuth();
 
-  const [mode, setMode] = useState<RockMode>("draft");
-
   const [rock, setRock] = useState<Rock | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
-  const [loadingRock, setLoadingRock] = useState(true);
+
+  const [mode, setMode] = useState<RockMode>("draft");
 
   const [saving, setSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
 
-  // Improve mode suggestion state
   const [suggestion, setSuggestion] = useState<ImproveSuggestion | null>(null);
   const [loadingSuggestion, setLoadingSuggestion] = useState(false);
   const [suggestionError, setSuggestionError] = useState<string | null>(null);
 
-  // Prevent overlapping saves
-  const saveInFlight = useRef<Promise<void> | null>(null);
+  // serialize saves
+  const inflightSaveRef = useRef<Promise<void> | null>(null);
+
+  const title = (rock as any)?.title ?? "";
+  const statement = (rock as any)?.statement ?? (rock as any)?.finalStatement ?? "";
 
   useEffect(() => {
     if (!uid || !rockId) return;
 
-    let alive = true;
-    (async () => {
-      setLoadingRock(true);
-      setLoadErr(null);
+    let cancelled = false;
 
+    (async () => {
       try {
+        setLoadErr(null);
         const r = await getRock(uid, rockId);
-        if (!alive) return;
+        if (cancelled) return;
         setRock(r);
-      } catch (e: any) {
-        if (!alive) return;
+      } catch {
+        if (cancelled) return;
         setLoadErr("Could not load this Rock.");
-      } finally {
-        if (!alive) return;
-        setLoadingRock(false);
       }
     })();
 
     return () => {
-      alive = false;
+      cancelled = true;
     };
   }, [uid, rockId]);
 
-  const title = rock?.title ?? "";
-  const statement = (rock as any)?.statement ?? (rock as any)?.finalStatement ?? "";
+  async function saveNow(nextRock?: Rock): Promise<void> {
+    if (!rockId) return;
+    const toSave = nextRock ?? rock;
+    if (!toSave) return;
 
-  async function saveNow(): Promise<void> {
-    if (!uid || !rockId || !rock) return;
-
-    // Serialize saves
-    if (saveInFlight.current) return saveInFlight.current;
+    // serialize
+    if (inflightSaveRef.current) await inflightSaveRef.current;
 
     setSaving(true);
-
     const p = (async () => {
       try {
-        await saveRock(uid, rockId, rock);
+        await saveRock(rockId, toSave);
         setLastSavedAt(Date.now());
       } finally {
         setSaving(false);
-        saveInFlight.current = null;
       }
     })();
 
-    saveInFlight.current = p;
-    return p;
+    inflightSaveRef.current = p;
+    await p;
+    inflightSaveRef.current = null;
   }
 
-  async function ensureSuggestion(): Promise<void> {
-    if (!statement?.trim()) {
+  async function enterImprove() {
+    setMode("improve");
+
+    const txt = statement?.trim();
+    if (!txt) {
       setSuggestion(null);
-      setSuggestionError("Write a Rock statement first.");
+      setSuggestionError("Write a draft first.");
       return;
     }
 
@@ -147,13 +199,8 @@ export default function RockDetailPage() {
     setSuggestionError(null);
 
     try {
-      const s = await fetchSuggestion(statement);
-      const sug: ImproveSuggestion = {
-        id: makeSuggestionId(s),
-        text: s,
-        recommended: true,
-      };
-      setSuggestion(sug);
+      const s = await fetchSuggestion(txt);
+      setSuggestion({ id: makeSuggestionId("rec"), text: s, recommended: true });
     } catch {
       setSuggestion(null);
       setSuggestionError("Could not generate a suggestion.");
@@ -162,88 +209,105 @@ export default function RockDetailPage() {
     }
   }
 
-  async function enterImproveMode(): Promise<void> {
-    setMode("improve");
-    // Generate suggestion on entry
-    await ensureSuggestion();
+  async function requestAnother() {
+    const txt = statement?.trim();
+    if (!txt) return;
+
+    setLoadingSuggestion(true);
+    setSuggestionError(null);
+
+    try {
+      const s = await fetchSuggestion(txt);
+      setSuggestion({ id: makeSuggestionId("s"), text: s });
+    } catch {
+      setSuggestionError("Could not generate a suggestion.");
+    } finally {
+      setLoadingSuggestion(false);
+    }
   }
 
-  async function applySuggestion(sText: string): Promise<void> {
+  async function applySuggestion(nextText: string) {
     if (!rock) return;
 
-    // Store to the existing statement field you use
-    const nextRock: Rock = {
-      ...rock,
-      // Prefer "statement" if present, otherwise fall back to "finalStatement"
-      ...(Object.prototype.hasOwnProperty.call(rock as any, "statement")
-        ? ({ statement: sText } as any)
-        : ({ finalStatement: sText } as any)),
-    };
+    const nextRock: any = { ...rock };
 
-    setRock(nextRock);
-    await saveRock(uid!, rockId!, nextRock);
-    setLastSavedAt(Date.now());
+    if (Object.prototype.hasOwnProperty.call(nextRock, "statement")) {
+      nextRock.statement = nextText;
+    } else {
+      nextRock.finalStatement = nextText;
+    }
+
+    nextRock.updatedAt = Date.now();
+    setRock(nextRock as Rock);
+
+    await saveNow(nextRock as Rock);
   }
 
-  // Basic page-level states
-  if (loading || loadingRock) {
-    return (
-      <div className="min-h-[60vh] flex items-center justify-center text-white/70">
-        Loading…
-      </div>
-    );
+  if (loading) {
+    return <div className="min-h-[60vh] flex items-center justify-center text-white/70">Loading…</div>;
   }
 
-  if (loadErr || !rock) {
+  if (!uid) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center px-6">
         <div className="max-w-md w-full rounded-2xl border border-white/10 bg-white/5 p-5">
-          <div className="text-white font-semibold mb-2">Something went wrong</div>
-          <div className="text-white/70 text-sm mb-4">{loadErr ?? "Missing Rock."}</div>
-          <button
-            className="inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold text-white bg-[#FF7900]"
-            onClick={() => router.push("/dashboard")}
-          >
-            Back to Dashboard
-          </button>
+          <div className="text-white font-semibold mb-2">Please sign in</div>
+          <div className="text-white/70 text-sm">You need an account to view Rocks.</div>
         </div>
       </div>
     );
   }
 
+  if (loadErr) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center px-6">
+        <div className="max-w-md w-full rounded-2xl border border-white/10 bg-white/5 p-5">
+          <div className="text-white font-semibold mb-2">Error</div>
+          <div className="text-white/70 text-sm">{loadErr}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!rock) {
+    return <div className="min-h-[60vh] flex items-center justify-center text-white/70">Loading Rock…</div>;
+  }
+
   return (
     <div className="w-full">
+      <CollapsedHeader
+        titleLeft="Rock"
+        titleRight={mode === "draft" ? "Draft" : "Improve"}
+        rightSlot={lastSavedAt ? <span className="text-white/55">Saved</span> : null}
+      />
+
       {mode === "draft" ? (
         <DraftMode
-          rockTitle={title}
-          rockStatement={statement}
+          draft={statement}
+          title={title}
           saving={saving}
           lastSavedAt={lastSavedAt}
-          onChangeTitle={(next) => {
-            setRock((prev) => (prev ? ({ ...prev, title: next } as Rock) : prev));
-          }}
-          onChangeStatement={(next) => {
-            setRock((prev) => {
+          onChangeDraft={(next) => {
+            setRock((prev: any) => {
               if (!prev) return prev;
-              const hasStatement = Object.prototype.hasOwnProperty.call(prev as any, "statement");
-              return hasStatement
-                ? ({ ...(prev as any), statement: next } as Rock)
-                : ({ ...(prev as any), finalStatement: next } as Rock);
+              const hasStatement = Object.prototype.hasOwnProperty.call(prev, "statement");
+              return hasStatement ? { ...prev, statement: next } : { ...prev, finalStatement: next };
             });
           }}
-          onSaveNow={saveNow}
-          onContinue={enterImproveMode}
+          onChangeTitle={(next) => setRock((prev: any) => (prev ? { ...prev, title: next } : prev))}
+          onSaveNow={async () => saveNow()}
+          onContinue={enterImprove}
         />
       ) : (
         <ImproveMode
+          draftText={statement}
           rockTitle={title}
-          rockStatement={statement}
-          suggestion={suggestion}
+          suggestion={suggestion as any}
           loadingSuggestion={loadingSuggestion}
           suggestionError={suggestionError}
-          onRequestAnother={ensureSuggestion}
+          onRequestAnother={requestAnother}
           onApplySuggestion={applySuggestion}
-          onSkip={() => setMode("draft")}
+          onBackToDraft={() => setMode("draft")}
         />
       )}
     </div>

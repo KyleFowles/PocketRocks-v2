@@ -2,27 +2,25 @@
    FILE: src/app/rocks/new/page.tsx
 
    SCOPE:
-   True mobile-first data-entry flow for /rocks/new:
+   Rebuild /rocks/new as a true mobile-first data-entry flow:
    - Collapsed header (no hero)
-   - No stepper in the content
    - Draft input dominates the viewport
    - Sticky bottom progress
    - Improve mode uses the same pattern
 
-   KEY FIX (PERSISTENCE):
-   - Create a real rockId immediately via crypto.randomUUID()
-   - saveRock(uid, rockId, rock) should create/persist the doc
-   - After first save, router.replace(`/rocks/${rockId}`) for stable URL
+   BUILD FIX:
+   Project saveRock() expects 2 arguments (not 3).
+   This page now calls saveRock(rockId, rock).
 
    ASSUMES:
    - useAuth at "@/lib/useAuth"
-   - saveRock(uid, rockId, rock) at "@/lib/rocks"
+   - saveRock at "@/lib/rocks" supports (rockId, rock)
    - /api/rock-suggest endpoint exists
    ============================================================ */
 
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import CollapsedHeader from "@/components/rock/CollapsedHeader";
@@ -41,7 +39,6 @@ async function fetchSuggestion(text: string): Promise<string> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),
   });
-
   if (!res.ok) throw new Error("suggest_failed");
   const data = await res.json();
 
@@ -56,12 +53,9 @@ async function fetchSuggestion(text: string): Promise<string> {
 }
 
 function newId(): string {
-  // Browser-safe unique id without pulling in a UUID lib
-  // (crypto.randomUUID is supported in modern browsers)
   if (typeof crypto !== "undefined" && typeof (crypto as any).randomUUID === "function") {
     return (crypto as any).randomUUID();
   }
-  // Fallback: timestamp + random
   return `rock_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
@@ -81,10 +75,7 @@ export default function NewRockPage() {
   const [loadingSuggestion, setLoadingSuggestion] = useState(false);
   const [suggestionError, setSuggestionError] = useState<string | null>(null);
 
-  // Prevent repeated routing/creating on re-renders
-  const hasReplacedUrlRef = useRef(false);
-
-  // Initialize: create rockId + local rock object immediately (fast UI)
+  // Minimal “new rock” initialization
   useEffect(() => {
     if (!uid) return;
 
@@ -95,8 +86,6 @@ export default function NewRockPage() {
 
       const initial: any = {
         title: "",
-        // Most of your code supports either "statement" or "finalStatement".
-        // We'll default to "statement" here.
         statement: "",
         status: "on-track",
         createdAt: Date.now(),
@@ -110,25 +99,23 @@ export default function NewRockPage() {
   const title = (rock as any)?.title ?? "";
   const statement = (rock as any)?.statement ?? (rock as any)?.finalStatement ?? "";
 
-  const canPersist = useMemo(() => !!uid && !!rock && !!rockId, [uid, rock, rockId]);
-
-  async function saveNow(): Promise<void> {
-    if (!canPersist) return;
+  async function saveNow(nextRock?: Rock): Promise<void> {
+    if (!uid || !rock || !rockId) return;
 
     setSaving(true);
     try {
-      const nextRock: any = { ...(rock as any), updatedAt: Date.now() };
-      setRock(nextRock as Rock);
+      const toSave: any = nextRock ?? rock;
+      toSave.updatedAt = Date.now();
 
-      await saveRock(uid!, rockId!, nextRock as Rock);
+      setRock(toSave as Rock);
+
+      // ✅ BUILD FIX: saveRock expects 2 args in this project
+      await saveRock(rockId, toSave as Rock);
+
       setLastSavedAt(Date.now());
 
-      // Once we have a persisted id, move to a stable URL.
-      // This prevents losing state on refresh and aligns with /rocks/[rockId].
-      if (!hasReplacedUrlRef.current) {
-        hasReplacedUrlRef.current = true;
-        router.replace(`/rocks/${rockId}`);
-      }
+      // Stable URL after first save
+      router.replace(`/rocks/${rockId}`);
     } finally {
       setSaving(false);
     }
@@ -164,7 +151,6 @@ export default function NewRockPage() {
 
     setLoadingSuggestion(true);
     setSuggestionError(null);
-
     try {
       const s = await fetchSuggestion(txt);
       setSuggestion({ id: String(Date.now()), text: s });
@@ -190,14 +176,10 @@ export default function NewRockPage() {
     setRock(nextRock as Rock);
 
     // Persist immediately if we can
-    if (canPersist) {
-      await saveRock(uid!, rockId!, nextRock as Rock);
+    if (rockId) {
+      await saveRock(rockId, nextRock as Rock);
       setLastSavedAt(Date.now());
-
-      if (!hasReplacedUrlRef.current) {
-        hasReplacedUrlRef.current = true;
-        router.replace(`/rocks/${rockId}`);
-      }
+      router.replace(`/rocks/${rockId}`);
     }
   }
 
@@ -227,19 +209,7 @@ export default function NewRockPage() {
       <CollapsedHeader
         titleLeft="Create Rock"
         titleRight={mode === "draft" ? "Draft" : "Improve"}
-        rightSlot={
-          mode === "improve" ? (
-            <button
-              type="button"
-              onClick={() => setMode("draft")}
-              className="text-xs text-white/60 hover:text-white transition"
-            >
-              Back
-            </button>
-          ) : lastSavedAt ? (
-            <span className="text-white/55">Saved</span>
-          ) : null
-        }
+        rightSlot={lastSavedAt ? <span className="text-white/55">Saved</span> : null}
       />
 
       {mode === "draft" ? (
@@ -256,7 +226,7 @@ export default function NewRockPage() {
             });
           }}
           onChangeTitle={(next) => setRock((prev: any) => (prev ? { ...prev, title: next } : prev))}
-          onSaveNow={saveNow}
+          onSaveNow={async () => saveNow()}
           onContinue={enterImprove}
         />
       ) : (
