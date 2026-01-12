@@ -1,395 +1,179 @@
-/* ============================================================
-   FILE: src/components/rock/AISuggestionsPanel.tsx
-
-   PURPOSE:
-   AI Suggestions panel for a Rock page.
-
-   UPDATES (THIS VERSION):
-   1) "Suggested statements" are now EDITABLE (each suggestion is a textarea).
-   2) Regenerate suggestions WITHOUT losing edits:
-      - Before regen, we save your current edited suggestions into "Saved drafts"
-      - You can restore any draft back into the editor
-   3) Apply uses the CURRENT edited text (not the original).
-
-   NOTE:
-   - Expects an API route at POST /api/rock-suggest that returns:
-       {
-         suggestedStatements?: string[],
-         improvements?: string[],
-         smartNotes?: string[],
-         raw?: string
-       }
-   - Parent should pass the current Rock fields + an onApply callback.
-   ============================================================ */
-
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+// FILE: src/components/rock/AISuggestionsPanel.tsx
 
-type RockStatus = "On Track" | "At Risk" | "Off Track" | string;
+import React, { useMemo, useState } from "react";
+import type { Rock } from "@/types/rock";
 
-type SuggestResponse = {
-  suggestedStatements?: string[];
-  improvements?: string[];
-  smartNotes?: string[];
-  raw?: string;
-};
-
-type SuggestionRow = {
+type AiSuggestion = {
   id: string;
   text: string;
-  isRecommended?: boolean;
+  recommended?: boolean;
 };
 
-type DraftSnapshot = {
-  id: string;
-  label: string;
-  createdAt: Date;
-  suggestions: { text: string }[]; // keep it simple + stable
-};
+function uid(): string {
+  return `ai_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
+}
+
+function safeTrim(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+async function postJson<TResponse>(url: string, body: unknown): Promise<TResponse> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  const text = await res.text();
+  let data: unknown = null;
+
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    // ignore JSON parse errors
+  }
+
+  if (!res.ok) {
+    const message =
+      typeof (data as { error?: unknown })?.error === "string"
+        ? (data as { error: string }).error
+        : safeTrim(text) || `Request failed (${res.status})`;
+
+    throw new Error(message);
+  }
+
+  return data as TResponse;
+}
 
 export default function AISuggestionsPanel(props: {
-  // Required inputs for generating suggestions
-  title: string;
-  status: RockStatus;
-  dueDate: string;
-  finalStatement: string;
-
-  // Called when user wants to apply a statement to the Rock page
-  onApply: (text: string) => void;
-
-  // Optional UI controls
-  topN?: number; // default 3
-  className?: string;
-
-  // Optional: allow parent to auto-run
-  autoGenerateOnMount?: boolean;
+  rock: Rock;
+  onApply: (finalStatement: string) => void;
 }) {
-  const topN = props.topN ?? 3;
+  const { rock, onApply } = props;
 
-  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<AiSuggestion[]>([]);
+  const [appliedId, setAppliedId] = useState<string | null>(null);
 
-  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const canGenerate = useMemo(() => {
+    return safeTrim(rock.draft).length >= 8 || safeTrim(rock.finalStatement).length >= 8;
+  }, [rock]);
 
-  // Suggestions (editable)
-  const [suggestions, setSuggestions] = useState<SuggestionRow[]>([]);
-
-  // Extra output
-  const [improvements, setImprovements] = useState<string[]>([]);
-  const [smartNotes, setSmartNotes] = useState<string[]>([]);
-  const [raw, setRaw] = useState<string>("");
-
-  // Drafts (preserve edits on regenerate)
-  const [drafts, setDrafts] = useState<DraftSnapshot[]>([]);
-
-  // To avoid auto-running twice in dev strict mode
-  const didAutoRunRef = useRef(false);
-
-  const headerTime = useMemo(() => {
-    if (!updatedAt) return "";
-    return updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  }, [updatedAt]);
-
-  function uid() {
-    // Stable-enough unique ID without extra deps
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const c: any = globalThis.crypto;
-    if (c?.randomUUID) return c.randomUUID();
-    return `id_${Math.random().toString(16).slice(2)}_${Date.now()}`;
-  }
-
-  function setFromResponse(json: SuggestResponse) {
-    const list = (json.suggestedStatements ?? []).slice(0, topN);
-
-    const rows: SuggestionRow[] = list.map((t, idx) => ({
-      id: uid(),
-      text: String(t ?? "").trim(),
-      isRecommended: idx === 0,
-    }));
-
-    setSuggestions(rows);
-    setImprovements((json.improvements ?? []).map((x) => String(x)));
-    setSmartNotes((json.smartNotes ?? []).map((x) => String(x)));
-    setRaw(String(json.raw ?? ""));
-    setUpdatedAt(new Date());
-  }
-
-  function snapshotEdits(label: string) {
-    if (!suggestions.length) return;
-
-    const snapshot: DraftSnapshot = {
-      id: uid(),
-      label,
-      createdAt: new Date(),
-      suggestions: suggestions.map((s) => ({ text: s.text })),
-    };
-
-    setDrafts((prev) => [snapshot, ...prev].slice(0, 10)); // keep last 10
-  }
-
-  async function fetchSuggestions() {
-    setLoading(true);
+  async function generate() {
     setError(null);
+    setAppliedId(null);
+    setBusy(true);
 
     try {
-      const res = await fetch("/api/rock-suggest", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: props.title ?? "",
-          status: props.status ?? "",
-          dueDate: props.dueDate ?? "",
-          finalStatement: props.finalStatement ?? "",
-        }),
+      const data = await postJson<{ suggestions?: unknown[] }>("/api/rock-suggest", {
+        rock,
+        context: { mode: "suggestions", requested: 5 },
       });
 
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        throw new Error(txt || `Request failed (${res.status})`);
+      const raw = Array.isArray(data?.suggestions) ? data.suggestions : [];
+
+      const items: AiSuggestion[] = raw
+        .map((s, i) => ({
+          id: uid(),
+          text: safeTrim(s),
+          recommended: i === 0,
+        }))
+        .filter((s) => s.text.length > 0);
+
+      if (items.length > 0 && !items.some((s) => s.recommended)) {
+        items[0].recommended = true;
       }
 
-      const json = (await res.json()) as SuggestResponse;
-      setFromResponse(json);
-    } catch (e: any) {
-      setError(e?.message || "Failed to get suggestions.");
+      setSuggestions(items);
+
+      if (items.length === 0) {
+        setError("No suggestions returned. Try refining your draft and try again.");
+      }
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Failed to generate suggestions.";
+      setError(message);
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   }
 
-  async function regenerate() {
-    // Save current edits before overwriting
-    snapshotEdits("Saved draft (before regenerate)");
-    await fetchSuggestions();
+  function applySuggestion(s: AiSuggestion) {
+    setAppliedId(s.id);
+    onApply(s.text);
   }
-
-  function applyText(text: string) {
-    const cleaned = (text ?? "").trim();
-    if (!cleaned) return;
-    props.onApply(cleaned);
-  }
-
-  function restoreDraft(d: DraftSnapshot) {
-    const rows: SuggestionRow[] = (d.suggestions ?? []).slice(0, topN).map((s, idx) => ({
-      id: uid(),
-      text: String(s.text ?? ""),
-      isRecommended: idx === 0,
-    }));
-    setSuggestions(rows);
-    setUpdatedAt(new Date());
-  }
-
-  useEffect(() => {
-    if (!props.autoGenerateOnMount) return;
-    if (didAutoRunRef.current) return;
-    didAutoRunRef.current = true;
-    void fetchSuggestions();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   return (
-    <div
-      className={[
-        "rounded-3xl border border-white/10 bg-white/[0.04] p-6 shadow-[0_20px_80px_-40px_rgba(0,0,0,0.9)] backdrop-blur",
-        props.className ?? "",
-      ].join(" ")}
-    >
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className="rounded-2xl border border-orange-500/30 bg-orange-500/5 p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="flex items-baseline gap-3">
-            <div className="text-xl font-extrabold tracking-tight">AI Suggestions</div>
-            <div className="text-xs text-white/50">{updatedAt ? `Updated ${headerTime}` : ""}</div>
-          </div>
-          <div className="mt-1 text-sm text-white/65">
-            Get sharper, measurable Rock statements and SMART tightening.
+          <div className="text-sm font-extrabold text-white">AI Suggestions</div>
+          <div className="text-xs text-slate-300">
+            Generate concise, outcome-based Rock statements.
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void regenerate()}
-            disabled={loading}
-            className={[
-              "rounded-2xl border border-white/10 px-4 py-2 text-sm font-extrabold",
-              "bg-[#FF7900]/20 hover:bg-[#FF7900]/26",
-              "focus:outline-none focus:ring-2 focus:ring-[#FF7900]/45",
-              loading ? "opacity-60" : "",
-            ].join(" ")}
-          >
-            {loading ? "Working…" : suggestions.length ? "Regenerate" : "Get suggestions"}
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={generate}
+          disabled={busy || !canGenerate}
+          className="rounded-xl bg-orange-500 px-4 py-2 text-sm font-extrabold text-black disabled:opacity-50"
+        >
+          {busy ? "Generating…" : suggestions.length ? "Regenerate" : "Generate"}
+        </button>
       </div>
 
-      {/* Error */}
       {error && (
-        <div className="mt-4 rounded-2xl border border-red-500/25 bg-red-500/10 p-4 text-sm">
-          <span className="font-extrabold">Error:</span> {error}
+        <div className="mb-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-white">
+          {error}
         </div>
       )}
 
-      {/* Suggested Statements */}
-      <div className="mt-6 rounded-3xl border border-white/10 bg-black/20 p-5">
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-extrabold text-white/80">Suggested statements</div>
-          <div className="rounded-full border border-white/12 bg-white/5 px-3 py-1 text-xs font-extrabold text-white/70">
-            Top {topN}
-          </div>
+      {suggestions.length === 0 && !busy && !error && (
+        <div className="rounded-xl border border-dashed border-white/20 p-4 text-sm text-slate-300">
+          Click <strong>Generate</strong> to get AI-assisted Rock statements.
         </div>
+      )}
 
-        <div className="mt-4 grid gap-3">
-          {suggestions.length === 0 ? (
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
-              Click <b className="text-white">Get suggestions</b> to generate editable statements.
-            </div>
-          ) : (
-            suggestions.map((s) => (
+      {suggestions.length > 0 && (
+        <div className="grid gap-3">
+          {suggestions.map((s) => {
+            const applied = appliedId === s.id;
+
+            return (
               <div
                 key={s.id}
-                className={[
-                  "rounded-2xl border bg-white/[0.03] p-4",
-                  s.isRecommended ? "border-white/20" : "border-white/10",
-                ].join(" ")}
+                className="rounded-xl border border-white/15 bg-black/40 p-3"
               >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-center gap-2">
-                    {s.isRecommended && (
-                      <div className="rounded-full border border-[#FF7900]/30 bg-[#FF7900]/15 px-3 py-1 text-xs font-extrabold text-[#FFB27A]">
-                        Recommended
-                      </div>
-                    )}
-                  </div>
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  {s.recommended && (
+                    <span className="rounded-full border border-orange-400/50 bg-orange-400/20 px-2 py-1 text-xs font-bold text-white">
+                      Recommended
+                    </span>
+                  )}
+                  {applied && (
+                    <span className="rounded-full border border-green-400/50 bg-green-400/20 px-2 py-1 text-xs font-bold text-white">
+                      Applied ✓
+                    </span>
+                  )}
+                </div>
 
+                <div className="mb-3 text-sm text-white">{s.text}</div>
+
+                <div className="flex justify-end">
                   <button
                     type="button"
-                    onClick={() => applyText(s.text)}
-                    className="rounded-2xl border border-white/12 bg-white/5 px-4 py-2 text-xs font-extrabold hover:bg-white/8 focus:outline-none focus:ring-2 focus:ring-[#FF7900]/35"
+                    onClick={() => applySuggestion(s)}
+                    className="rounded-xl bg-orange-500 px-3 py-1.5 text-xs font-extrabold text-black"
                   >
                     Apply
                   </button>
                 </div>
-
-                {/* Editable textarea */}
-                <textarea
-                  value={s.text}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setSuggestions((prev) =>
-                      prev.map((x) => (x.id === s.id ? { ...x, text: v } : x))
-                    );
-                  }}
-                  rows={3}
-                  className={[
-                    "mt-3 w-full resize-y rounded-2xl border border-white/10 bg-black/25 p-3 text-sm text-white/90",
-                    "outline-none focus:border-white/20 focus:ring-2 focus:ring-[#FF7900]/25",
-                  ].join(" ")}
-                />
-
-                <div className="mt-2 text-xs text-white/45">
-                  Tip: Edit this statement first, then click <b className="text-white/70">Apply</b>.
-                </div>
               </div>
-            ))
-          )}
-        </div>
-      </div>
-
-      {/* Saved Drafts */}
-      {drafts.length > 0 && (
-        <div className="mt-6 rounded-3xl border border-white/10 bg-black/20 p-5">
-          <div className="text-sm font-extrabold text-white/80">Saved drafts</div>
-          <div className="mt-1 text-xs text-white/55">
-            These were saved automatically before regenerating, so edits are never lost.
-          </div>
-
-          <div className="mt-4 grid gap-3">
-            {drafts.map((d) => (
-              <div key={d.id} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <div className="text-sm font-extrabold text-white/85">{d.label}</div>
-                    <div className="mt-1 text-xs text-white/50">
-                      {d.createdAt.toLocaleString()}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => restoreDraft(d)}
-                      className="rounded-2xl border border-white/12 bg-white/5 px-4 py-2 text-xs font-extrabold hover:bg-white/8 focus:outline-none focus:ring-2 focus:ring-[#FF7900]/35"
-                    >
-                      Restore to editor
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => applyText((d.suggestions?.[0]?.text ?? "").trim())}
-                      className="rounded-2xl border border-white/12 bg-white/5 px-4 py-2 text-xs font-extrabold hover:bg-white/8 focus:outline-none focus:ring-2 focus:ring-[#FF7900]/35"
-                      title="Applies the first statement in this draft"
-                    >
-                      Apply first
-                    </button>
-                  </div>
-                </div>
-
-                <div className="mt-3 grid gap-2">
-                  {d.suggestions.slice(0, topN).map((s, idx) => (
-                    <div
-                      key={`${d.id}_${idx}`}
-                      className="rounded-xl border border-white/10 bg-black/25 p-3 text-xs text-white/75"
-                    >
-                      {s.text}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Improvements + SMART Notes */}
-      {(improvements.length > 0 || smartNotes.length > 0) && (
-        <div className="mt-6 grid gap-3 md:grid-cols-2">
-          {improvements.length > 0 && (
-            <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
-              <div className="text-sm font-extrabold text-white/80">Improvements</div>
-              <ul className="mt-3 space-y-2 text-sm text-white/70">
-                {improvements.slice(0, 6).map((x, i) => (
-                  <li key={i} className="list-disc pl-5">
-                    {x}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {smartNotes.length > 0 && (
-            <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
-              <div className="text-sm font-extrabold text-white/80">SMART tightening</div>
-              <ul className="mt-3 space-y-2 text-sm text-white/70">
-                {smartNotes.slice(0, 6).map((x, i) => (
-                  <li key={i} className="list-disc pl-5">
-                    {x}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Raw output */}
-      {raw && (
-        <div className="mt-6 rounded-3xl border border-white/10 bg-black/30 p-5">
-          <div className="text-sm font-extrabold text-white/70">Raw output</div>
-          <pre className="mt-3 max-h-[260px] overflow-auto whitespace-pre-wrap rounded-2xl border border-white/10 bg-black/40 p-4 text-xs text-white/70">
-            {raw}
-          </pre>
+            );
+          })}
         </div>
       )}
     </div>

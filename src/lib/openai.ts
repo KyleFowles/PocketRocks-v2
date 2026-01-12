@@ -9,17 +9,25 @@
 
    NOTES:
    - Do NOT import this file from client components.
-   - Requires: npm i openai zod
+   - Requires: npm i openai
    ============================================================ */
 
+import "server-only";
 import OpenAI from "openai";
 
-const apiKey = process.env.OPENAI_API_KEY;
+let cached: OpenAI | null = null;
 
-if (!apiKey) {
-  throw new Error(
-    "Missing OPENAI_API_KEY. Add it to your .env.local and restart the dev server."
-  );
+export function getOpenAI(): OpenAI {
+  if (cached) return cached;
+
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!apiKey || typeof apiKey !== "string") {
+    throw new Error(
+      "Missing OPENAI_API_KEY. Add it to your .env.local and restart the dev server."
+    );
+  }
+
+  cached = new OpenAI({ apiKey });
+  return cached;
 }
-
-export const openai = new OpenAI({ apiKey });

@@ -48,8 +48,8 @@ export type Rock = {
 
   weeklyUpdates?: WeeklyUpdate[];
 
-  createdAt?: any;
-  updatedAt?: any;
+  createdAt?: unknown;
+  updatedAt?: unknown;
 
   // NOTE: archived is intentionally not part of the type.
 };
