@@ -4,66 +4,64 @@
    FILE: src/components/rock/CollapsedHeader.tsx
 
    SCOPE:
-   PocketRocks primary header for focused creation flows.
+   Bold PocketRocks header for mobile-first flows.
+   - Left: PocketRocks wordmark (Pocket = orange, Rocks = white)
+   - Center: context label (e.g., "Create Rock · Draft")
+   - Right: optional slot (e.g., Saved)
 
-   PROMINENCE UPDATE (LOCKED):
-   - PocketRocks is the dominant visual anchor
-   - Brand outweighs screen context
-   - No blur, no haze, no translucency
-   - Calm authority, not decoration
-
-   DESIGN INTENT:
-   When this loads, the user should instantly know:
-   “I am inside PocketRocks, and this is serious work.”
+   UX:
+   - Confident product identity without a "hero" block
+   - Compact height for iPhone
    ============================================================ */
 
 import React from "react";
 
 export default function CollapsedHeader(props: {
-  titleLeft?: string;
-  titleRight?: string;
+  titleLeft?: string; // optional override
+  titleRight?: string; // optional override
+  centerText?: string; // preferred: single center line like "Create Rock · Draft"
   rightSlot?: React.ReactNode;
 }) {
-  const { titleLeft, titleRight, rightSlot } = props;
+  const { centerText, rightSlot } = props;
 
   return (
-    <header className="sticky top-0 z-40">
-      {/* Solid, high-contrast surface */}
-      <div className="bg-[#050b18] border-b border-white/10 shadow-[0_8px_28px_rgba(0,0,0,0.6)]">
-        <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
-          
-          {/* Brand + context */}
-          <div className="flex flex-col gap-1">
-            {/* POCKETROCKS — PRIMARY ANCHOR */}
-            <div className="flex items-baseline leading-none">
-              <span className="text-[22px] sm:text-[24px] font-bold tracking-tight text-[#FF7900]">
+    <header className="sticky top-0 z-40 w-full">
+      {/* subtle glass bar */}
+      <div className="w-full border-b border-white/10 bg-[#0B1220]/70 backdrop-blur-md">
+        <div className="mx-auto max-w-5xl px-4 h-14 flex items-center gap-3">
+          {/* Left: PocketRocks wordmark */}
+          <div className="flex items-center min-w-[140px]">
+            <div
+              className="
+                select-none
+                font-extrabold
+                tracking-tight
+                leading-none
+                text-[18px]
+                sm:text-[20px]
+              "
+              aria-label="PocketRocks"
+            >
+              <span className="text-[#FF7900] drop-shadow-[0_6px_18px_rgba(255,121,0,0.45)]">
                 Pocket
               </span>
-              <span className="ml-0.5 text-[22px] sm:text-[24px] font-bold tracking-tight text-white">
+              <span className="text-white drop-shadow-[0_6px_18px_rgba(0,0,0,0.55)]">
                 Rocks
               </span>
             </div>
-
-            {/* Context — clearly secondary */}
-            {(titleLeft || titleRight) ? (
-              <div className="text-[11px] uppercase tracking-wide text-white/55">
-                {titleLeft}
-                {titleRight ? (
-                  <>
-                    <span className="mx-1">·</span>
-                    <span>{titleRight}</span>
-                  </>
-                ) : null}
-              </div>
-            ) : null}
           </div>
 
-          {/* Right-side status */}
-          {rightSlot ? (
-            <div className="text-xs text-white/60">
-              {rightSlot}
+          {/* Center: context */}
+          <div className="flex-1 flex justify-center">
+            <div className="text-white/85 text-sm font-semibold tracking-tight">
+              {centerText ?? "Create Rock · Draft"}
             </div>
-          ) : null}
+          </div>
+
+          {/* Right: status slot */}
+          <div className="min-w-[140px] flex justify-end">
+            {rightSlot ? <div className="text-xs text-white/60">{rightSlot}</div> : null}
+          </div>
         </div>
       </div>
     </header>
