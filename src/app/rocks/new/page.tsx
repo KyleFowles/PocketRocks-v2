@@ -3,10 +3,9 @@
 
    SCOPE:
    Create Rock (Step 1)
-   - Hero-sized PocketRocks header
-   - Header aligned with panel
+   - Hero header
+   - Flex shell + sticky footer (no overlap)
    - Shorter textareas
-   - Docked footer CTA
    ============================================================ */
 
 "use client";
@@ -74,52 +73,54 @@ export default function NewRockPage() {
   }
 
   return (
-    <div className="pr-page">
-      {/* Shared width container */}
-      <div className="max-w-3xl mx-auto px-6">
-        {/* HERO HEADER (larger + unmistakable) */}
-        <div className="pt-8 pb-4">
-          <div className="text-[34px] leading-tight">
-            <span className="pr-header-accent font-extrabold">Pocket</span>
-            <span className="font-black tracking-tight">Rocks</span>
+    <div className="pr-page pr-shell">
+      {/* Content */}
+      <div className="flex-1">
+        <div className="max-w-3xl mx-auto px-6">
+          {/* HERO HEADER */}
+          <div className="pt-8 pb-4">
+            <div className="text-[34px] leading-tight">
+              <span className="pr-header-accent font-extrabold">Pocket</span>
+              <span className="font-black tracking-tight">Rocks</span>
+            </div>
+            <div
+              className="mt-1 text-xs tracking-widest uppercase"
+              style={{ color: "var(--pr-muted)" }}
+            >
+              Create Rock · Draft
+            </div>
           </div>
-          <div
-            className="mt-1 text-xs tracking-widest uppercase"
-            style={{ color: "var(--pr-muted)" }}
-          >
-            Create Rock · Draft
-          </div>
-        </div>
 
-        {/* Main */}
-        <div className="pt-6 pb-40">
-          {err && <div className="pr-alert mb-3">{err}</div>}
+          {/* Main */}
+          <div className="pt-6 pb-10">
+            {err && <div className="pr-alert mb-3">{err}</div>}
 
-          <div className="pr-panel p-6">
-            <div className="pr-label mb-2">Draft Rock (one sentence)</div>
+            <div className="pr-panel p-6">
+              <div className="pr-label mb-2">Draft Rock (one sentence)</div>
 
-            <textarea
-              className="pr-textarea"
-              style={{ minHeight: 160 }}
-              placeholder="Enter text here."
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-            />
+              <textarea
+                className="pr-textarea"
+                style={{ minHeight: 160 }}
+                placeholder="Enter text here."
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+              />
 
-            <div className="mt-5 pr-label mb-2">Add details (optional)</div>
+              <div className="mt-5 pr-label mb-2">Add details (optional)</div>
 
-            <textarea
-              className="pr-textarea"
-              style={{ minHeight: 110 }}
-              placeholder="Add a few notes that help you clarify the Rock."
-              value={details}
-              onChange={(e) => setDetails(e.target.value)}
-            />
+              <textarea
+                className="pr-textarea"
+                style={{ minHeight: 110 }}
+                placeholder="Add a few notes that help you clarify the Rock."
+                value={details}
+                onChange={(e) => setDetails(e.target.value)}
+              />
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Docked footer */}
+      {/* Sticky footer (short + never overlaps content) */}
       <div className="pr-footer-dock">
         <div className="pr-footer-inner">
           <div className="text-xs" style={{ color: "var(--pr-muted)" }}>

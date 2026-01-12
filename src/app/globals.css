@@ -3,9 +3,9 @@
 
    SCOPE:
    Global styling for PocketRocks
-   - Crisp white text hierarchy
-   - Clear panel contrast
-   - Docked footer bar (always visible)
+   - Crisp text hierarchy
+   - Panel styles
+   - Sticky footer bar (no overlap, not tall)
    ============================================================ */
 
 @import "tailwindcss";
@@ -17,7 +17,7 @@
   --pr-bg: #0b1220;
   --pr-bg-2: #08101d;
 
-  /* TEXT HIERARCHY */
+  /* TEXT */
   --pr-white: #ffffff;
   --pr-text: #f5f7fa;
   --pr-muted: #b6c0d1;
@@ -28,9 +28,14 @@
   --pr-border-strong: rgba(229, 232, 235, 0.22);
 
   /* Brand */
-  --pr-orange: #ff7900;         /* header */
-  --pr-orange-cta: #f04e23;     /* button base */
+  --pr-orange: #ff7900;          /* header */
+  --pr-orange-cta: #f04e23;      /* button base */
   --pr-orange-cta-hover: #ff7900;
+
+  /* Neutral disabled */
+  --pr-disabled-bg: #2a3447;
+  --pr-disabled-border: rgba(255, 255, 255, 0.10);
+  --pr-disabled-text: rgba(255, 255, 255, 0.72);
 
   /* Focus */
   --pr-focus: rgba(255, 121, 0, 0.45);
@@ -68,6 +73,15 @@ body {
 }
 
 /* -------------------------
+   Shell layout (prevents footer overlap)
+------------------------- */
+.pr-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* -------------------------
    Panel / Card
 ------------------------- */
 .pr-panel {
@@ -90,7 +104,7 @@ body {
 }
 
 /* -------------------------
-   Textareas (crisp white)
+   Textareas
 ------------------------- */
 .pr-textarea {
   width: 100%;
@@ -137,7 +151,7 @@ body {
   font-size: 16px;
   line-height: 1;
 
-  padding: 14px 26px;
+  padding: 12px 24px;
   border-radius: 12px;
 
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -146,7 +160,7 @@ body {
   cursor: pointer;
 
   box-shadow:
-    0 10px 26px rgba(0, 0, 0, 0.42),
+    0 10px 22px rgba(0, 0, 0, 0.40),
     inset 0 1px 0 rgba(255, 255, 255, 0.10);
 
   transition:
@@ -166,31 +180,32 @@ body {
 .pr-primary-button:focus-visible {
   box-shadow:
     0 0 0 4px var(--pr-focus),
-    0 14px 34px rgba(0, 0, 0, 0.52),
+    0 14px 30px rgba(0, 0, 0, 0.50),
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 .pr-primary-button:disabled {
-  background-color: #7a3a1e;
-  border-color: rgba(255, 255, 255, 0.08);
+  background-color: var(--pr-disabled-bg);
+  color: var(--pr-disabled-text);
+  border-color: var(--pr-disabled-border);
   cursor: not-allowed;
   box-shadow: none;
 }
 
 /* -------------------------
-   Docked Footer (always visible)
+   Sticky Footer (short + no overlap)
 ------------------------- */
 .pr-footer-dock {
-  position: fixed;
+  position: sticky;
+  bottom: 0;
   left: 0;
   right: 0;
-  bottom: 0;
 
-  padding: 14px 18px;
+  padding: 10px 14px;
 
   background: linear-gradient(
     180deg,
-    rgba(8, 16, 29, 0.35),
+    rgba(8, 16, 29, 0.15),
     rgba(8, 16, 29, 0.88)
   );
   border-top: 1px solid rgba(255, 255, 255, 0.10);
@@ -204,5 +219,6 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+
+  gap: 8px; /* tighter */
 }
