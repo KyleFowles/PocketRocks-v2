@@ -1,29 +1,46 @@
 /* ============================================================
    FILE: src/app/globals.css
 
-   SCOPE:
-   Global styling + Tailwind directives.
-   - Tailwind v4 compatible
-   - Provides PocketRocks dark base look
+   FIX:
+   Ensure crisp, sharp white text on ALL orange buttons site-wide.
+
+   Applies to:
+   - Tailwind class bg-[#FF7900]
+   - Tailwind class bg-orange-500 (in case any screens use it)
+
+   Also helps on iPhone by improving font rasterization.
    ============================================================ */
 
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-:root {
-  color-scheme: dark;
+/* ------------------------------------------------------------
+   Global button text crispness for PocketRocks orange CTAs
+------------------------------------------------------------ */
+
+/* Target common “orange CTA” patterns */
+button.bg-\[\#FF7900\],
+a.bg-\[\#FF7900\],
+button.bg-orange-500,
+a.bg-orange-500 {
+  color: #ffffff;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+
+  /* Make white text look crisp on orange */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: geometricPrecision;
+
+  /* Subtle edge definition without looking “outlined” */
+  text-shadow: 0 0 0.6px rgba(255, 255, 255, 0.55);
 }
 
-html,
-body {
-  height: 100%;
-}
-
-body {
-  margin: 0;
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji",
-    "Segoe UI Emoji";
-  background: radial-gradient(1200px 600px at 20% 0%, rgba(255, 121, 0, 0.14), rgba(0, 0, 0, 0) 55%),
-    radial-gradient(900px 500px at 80% 10%, rgba(20, 34, 51, 0.55), rgba(0, 0, 0, 0) 60%),
-    linear-gradient(180deg, #0b1220 0%, #050810 100%);
-  color: rgba(255, 255, 255, 0.92);
+/* If any orange CTAs are divs/spans (rare), cover them too */
+.bg-\[\#FF7900\].text-white,
+.bg-orange-500.text-white {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+  text-shadow: 0 0 0.6px rgba(255, 255, 255, 0.55);
 }

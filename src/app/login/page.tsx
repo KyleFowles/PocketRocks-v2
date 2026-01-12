@@ -1,39 +1,30 @@
-"use client";
-
 /* ============================================================
    FILE: src/app/login/page.tsx
 
    FIX:
-   - Remove router.replace() from useMemo (render-time side effect)
-   - Redirect logged-in users using useEffect instead
-   - Keep a simple, reliable login UI
-
-   NOTES:
-   - Uses Firebase client auth directly (Google popup + optional anonymous)
-   - Assumes getAuthClient() is configured in src/lib/firebase.ts
+   - "Continue with Google" now actually signs in using Firebase
+     (signInWithPopup + GoogleAuthProvider).
+   - Shows clear error text if popup is blocked or auth fails.
+   - Disables buttons while working and routes to /dashboard on success.
    ============================================================ */
 
-import React, { useEffect, useState } from "react";
+"use client";
+
+import React, { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { GoogleAuthProvider, signInAnonymously, signInWithPopup } from "firebase/auth";
-
-import { useAuth } from "@/lib/useAuth";
+import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { getAuthClient } from "@/lib/firebase";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { uid, loading } = useAuth();
 
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // ✅ Redirect must happen in an effect (NOT during render / useMemo)
-  useEffect(() => {
-    if (!loading && uid) {
-      router.replace("/dashboard");
-    }
-  }, [loading, uid, router]);
+  const helpText = useMemo(() => {
+    return err ?? "Tip: If the Google popup is blocked, allow popups for this site and try again.";
+  }, [err]);
 
   async function handleGoogle() {
     setErr(null);
@@ -42,97 +33,78 @@ export default function LoginPage() {
     try {
       const auth = getAuthClient();
       const provider = new GoogleAuthProvider();
+
+      // Optional: keep it simple, no extra scopes.
       await signInWithPopup(auth, provider);
 
-      // useEffect will redirect once uid is present
+      router.push("/dashboard");
     } catch (e: any) {
-      const msg =
-        typeof e?.message === "string"
-          ? e.message
-          : "Google sign-in failed. Please try again.";
-      setErr(msg);
+      const code = String(e?.code ?? "");
+      // Common “nothing happens” causes:
+      // - popup blocked
+      // - closed by user
+      // - unauthorized domain / config issue
+      if (code.includes("auth/popup-blocked")) {
+        setErr("Popup blocked. Please allow popups for this site, then try again.");
+      } else if (code.includes("auth/popup-closed-by-user")) {
+        setErr("Popup closed. Please try again.");
+      } else if (code.includes("auth/unauthorized-domain")) {
+        setErr("Unauthorized domain. Add this domain to Firebase Auth → Authorized domains.");
+      } else {
+        setErr(e?.message ? String(e.message) : "Sign-in failed. Please try again.");
+      }
     } finally {
       setBusy(false);
     }
   }
 
-  async function handleAnonymous() {
-    setErr(null);
-    setBusy(true);
-
-    try {
-      const auth = getAuthClient();
-      await signInAnonymously(auth);
-
-      // useEffect will redirect once uid is present
-    } catch (e: any) {
-      const msg =
-        typeof e?.message === "string"
-          ? e.message
-          : "Guest sign-in failed. Please try again.";
-      setErr(msg);
-    } finally {
-      setBusy(false);
-    }
+  function handleGuest() {
+    router.push("/rocks/new");
   }
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-6 py-12">
-      <div className="mb-8">
-        <div className="text-xs font-semibold tracking-widest text-slate-500">
-          LOGIN
-        </div>
-        <h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">
-          Sign in
-        </h1>
-        <p className="mt-2 text-slate-300">
-          Sign in to create and manage your Rocks.
-        </p>
+    <main className="min-h-dvh w-full bg-[#05070b]">
+      {/* Subtle backdrop */}
+      <div className="pointer-events-none fixed inset-0 opacity-90">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(240,78,35,0.18),transparent_35%),radial-gradient(circle_at_85%_20%,rgba(20,34,51,0.75),transparent_45%),radial-gradient(circle_at_50%_90%,rgba(255,121,0,0.08),transparent_40%)]" />
       </div>
 
-      <div className="rounded-2xl border border-slate-800 bg-slate-950 p-6">
-        {loading && (
-          <div className="text-slate-300">Checking sign-in…</div>
-        )}
-
-        {!loading && uid && (
-          <div className="text-slate-300">Signed in. Redirecting…</div>
-        )}
-
-        {!loading && !uid && (
-          <>
-            {err && (
-              <div className="mb-4 rounded-2xl border border-red-900/60 bg-red-950/40 p-4 text-red-200">
-                {err}
-              </div>
-            )}
-
-            <div className="grid gap-3">
-              <button
-                type="button"
-                onClick={handleGoogle}
-                disabled={busy}
-                className="rounded-xl bg-orange-500 px-4 py-3 text-sm font-extrabold text-slate-950 hover:bg-orange-400 disabled:opacity-60"
-              >
-                {busy ? "Working…" : "Continue with Google"}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleAnonymous}
-                disabled={busy}
-                className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-semibold text-slate-200 hover:bg-slate-800 disabled:opacity-60"
-              >
-                {busy ? "Working…" : "Continue as Guest"}
-              </button>
+      <div className="relative mx-auto flex min-h-dvh max-w-xl flex-col justify-center px-4 py-10">
+        {/* Header */}
+        <div className="mb-6 flex items-center justify-center">
+          <div className="text-center">
+            <div className="text-[22px] font-extrabold tracking-tight">
+              <span className="text-[#FF7900]">Pocket</span>
+              <span className="text-white">Rocks</span>
             </div>
+            <div className="mt-1 text-sm text-white/70">Sign in to create and manage your Rocks.</div>
+          </div>
+        </div>
 
-            <div className="mt-4 text-xs text-slate-400">
-              Tip: If Google popup is blocked, allow popups for this site and try
-              again.
-            </div>
-          </>
-        )}
+        {/* Card */}
+        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_18px_60px_rgba(0,0,0,0.55)]">
+          <div className="space-y-3">
+            <button
+              type="button"
+              onClick={handleGoogle}
+              disabled={busy}
+              className="w-full rounded-xl bg-[#FF7900] px-4 py-3 text-base font-bold text-white shadow-[0_10px_30px_rgba(255,121,0,0.25)] transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {busy ? "Signing in…" : "Continue with Google"}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleGuest}
+              disabled={busy}
+              className="w-full rounded-xl border border-white/12 bg-white/[0.03] px-4 py-3 text-base font-semibold text-white/90 transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Continue as Guest
+            </button>
+
+            <div className="pt-1 text-xs text-white/55">{helpText}</div>
+          </div>
+        </div>
       </div>
     </main>
   );
