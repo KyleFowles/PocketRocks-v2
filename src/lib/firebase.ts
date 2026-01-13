@@ -1,16 +1,12 @@
-// src/lib/firebase.ts
-import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
+// FILE: src/lib/firebase.ts
+// SCOPE:
+// - Firebase client initialization (Auth + Firestore)
+// - Safe singleton caching for Next.js (prevents double-init in dev)
+// - Fixes TS error: FirebaseApp | undefined passed to getFirestore()
+
+import { initializeApp, getApp, getApps, type FirebaseApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
 import { getFirestore, type Firestore } from "firebase/firestore";
-
-/**
- * IMPORTANT:
- * - Never initialize Firebase during SSR/build.
- * - Vercel prerenders pages at build time (including /_not-found).
- * - If Firebase initializes on the server without env vars, builds fail.
- *
- * So we only initialize Firebase in the browser (typeof window !== "undefined").
- */
 
 type FirebaseClient = {
   app: FirebaseApp;
@@ -20,45 +16,45 @@ type FirebaseClient = {
 
 let cached: FirebaseClient | null = null;
 
-function getFirebaseConfig() {
-  return {
-    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "",
-    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "",
-    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "",
-    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "",
-    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
-    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "",
-  };
+const firebaseConfig = {
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY!,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN!,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID!,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET!,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID!,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID!,
+};
+
+// Optional: helps you catch missing env vars early during build.
+function assertEnv() {
+  const keys = [
+    "NEXT_PUBLIC_FIREBASE_API_KEY",
+    "NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN",
+    "NEXT_PUBLIC_FIREBASE_PROJECT_ID",
+    "NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET",
+    "NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID",
+    "NEXT_PUBLIC_FIREBASE_APP_ID",
+  ] as const;
+
+  for (const k of keys) {
+    if (!process.env[k]) {
+      throw new Error(`Missing Firebase env var: ${k}`);
+    }
+  }
 }
 
-function hasConfig(cfg: ReturnType<typeof getFirebaseConfig>) {
-  return Boolean(cfg.apiKey && cfg.authDomain && cfg.projectId && cfg.appId);
-}
-
-/**
- * Returns Firebase clients ONLY in the browser.
- * Returns null on the server/build step.
- */
-export function getFirebaseClient(): FirebaseClient | null {
-  // Server / build / prerender: do NOT initialize Firebase.
-  if (typeof window === "undefined") return null;
-
+export function getFirebaseClient(): FirebaseClient {
   if (cached) return cached;
 
-  const cfg = getFirebaseConfig();
-
-  // If env vars are missing in Vercel, we still must not crash the app at import time.
-  // We throw only when code actually tries to use Firebase on the client.
-  if (!hasConfig(cfg)) {
-    throw new Error(
-      "Firebase is not configured. Missing NEXT_PUBLIC_FIREBASE_* env vars."
-    );
+  // In Next.js, this file can be imported during build/server work.
+  // We only want to init the CLIENT SDK when running in the browser.
+  if (typeof window === "undefined") {
+    throw new Error("getFirebaseClient() called on the server. Use it in client components only.");
   }
 
-  // Prevent duplicate initialization in fast refresh / multi-bundle situations
-  const app =
-    getApps().length > 0 ? getApps()[0] : initializeApp(cfg);
+  assertEnv();
 
+  const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db = getFirestore(app);
 
@@ -66,20 +62,11 @@ export function getFirebaseClient(): FirebaseClient | null {
   return cached;
 }
 
-/** Convenience helpers */
-export function getAuthClient(): Auth {
-  const client = getFirebaseClient();
-  if (!client) {
-    // This should never happen on the client, but keep a clear message.
-    throw new Error("Firebase Auth requested during SSR/build. This is a bug.");
-  }
-  return client.auth;
+// Convenience exports (matches common usage patterns)
+export function getAuthClient() {
+  return getFirebaseClient().auth;
 }
 
-export function getDbClient(): Firestore {
-  const client = getFirebaseClient();
-  if (!client) {
-    throw new Error("Firestore requested during SSR/build. This is a bug.");
-  }
-  return client.db;
+export function getDbClient() {
+  return getFirebaseClient().db;
 }

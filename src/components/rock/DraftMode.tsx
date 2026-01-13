@@ -1,23 +1,27 @@
-"use client";
-
 /* ============================================================
    FILE: src/components/rock/DraftMode.tsx
 
    SCOPE:
-   Draft Mode = mobile-first data entry.
+   Draft Mode = mobile-first data entry (Responsive).
    - Draft input dominates viewport
    - Optional details stay hidden until typing starts
    - Sticky bottom progress + single primary action
 
    CLARITY UPDATE (REMOVES "SMOKE"):
    - Increase surface contrast (less transparent haze)
-   - Add a subtle spotlight behind the form
+   - Add a subtle spotlight behind the form (aligned to mineral teal palette)
    - Use crisp borders and stronger card separation
+
+   BUTTON SYSTEM:
+   - Uses shared <Button> component with mineral teal primary
+   - Removes hard-coded Tailwind orange focus rings and orange spotlight
 
    UX CONTRACT:
    - One job: type the draft
    - One primary action: Continue
    ============================================================ */
+
+"use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import StickyBottomBar from "@/components/rock/StickyBottomBar";
@@ -109,25 +113,25 @@ export default function DraftMode(props: {
   }
 
   return (
-    <div className="w-full max-w-xl mx-auto px-4 pt-6 pb-32 relative">
+    <div className="relative mx-auto w-full max-w-xl px-4 pb-32 pt-6">
       {/* Spotlight behind the form (clarity, not haze) */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -top-24 left-1/2 -translate-x-1/2 h-[420px] w-[560px] max-w-[90vw] rounded-full"
+        className="pointer-events-none absolute -top-24 left-1/2 h-[420px] w-[560px] max-w-[90vw] -translate-x-1/2 rounded-full"
         style={{
           background:
-            "radial-gradient(closest-side, rgba(255,121,0,0.14), rgba(20,34,51,0.0))",
+            "radial-gradient(closest-side, rgba(20,184,166,0.16), rgba(20,34,51,0.0))",
           filter: "blur(18px)",
           opacity: 1,
         }}
       />
 
       <div className="relative">
-        <div className="text-xs text-white/55 mb-3">{saveHint}</div>
+        <div className="mb-3 text-xs text-white/55">{saveHint}</div>
 
         {/* Crisp card surface (less transparency, more contrast) */}
-        <div className="rounded-2xl border border-white/12 bg-[#0b1628]/88 shadow-[0_18px_60px_rgba(0,0,0,0.55)] p-4 md:p-5">
-          <div className="text-xs text-white/70 mb-2">Draft Rock (one sentence)</div>
+        <div className="rounded-2xl border border-white/12 bg-[#0b1628]/88 p-4 shadow-[0_18px_60px_rgba(0,0,0,0.55)] md:p-5">
+          <div className="mb-2 text-xs text-white/70">Draft Rock (one sentence)</div>
 
           <textarea
             value={localDraft}
@@ -147,7 +151,7 @@ export default function DraftMode(props: {
               text-white
               placeholder:text-white/35
               focus:outline-none
-              focus:ring-2 focus:ring-[#FF7900]/75
+              focus:ring-2 focus:ring-teal-300/40
             "
           />
 
@@ -155,15 +159,16 @@ export default function DraftMode(props: {
             <div className="mt-4">
               <Button
                 type="button"
+                variant="ghost"
                 onClick={() => setShowDetails((s) => !s)}
-                className="text-sm text-white/70 hover:text-white transition"
+                className="w-full justify-start px-0 py-0 text-sm font-semibold text-white/70 hover:text-white sm:w-auto"
               >
                 {showDetails ? "Hide details" : "Add details (optional)"}
               </Button>
 
               {showDetails ? (
                 <div className="mt-3">
-                  <label className="block text-xs text-white/70 mb-2">Rock title (optional)</label>
+                  <label className="mb-2 block text-xs text-white/70">Rock title (optional)</label>
                   <input
                     value={localTitle}
                     onChange={(e) => setLocalTitle(e.target.value)}
@@ -177,7 +182,7 @@ export default function DraftMode(props: {
                       text-white
                       placeholder:text-white/35
                       focus:outline-none
-                      focus:ring-2 focus:ring-[#FF7900]/75
+                      focus:ring-2 focus:ring-teal-300/40
                     "
                   />
                 </div>

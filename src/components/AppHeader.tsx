@@ -1,5 +1,14 @@
 "use client";
 
+/* ============================================================
+   FILE: src/components/AppHeader.tsx
+
+   FINAL POLISH:
+   - Logout becomes "dangerGhost" (destructive, low weight)
+   - Dashboard remains primary
+   - No visual competition with workflow CTAs
+   ============================================================ */
+
 import React, { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -15,7 +24,7 @@ type HeaderRight = {
 };
 
 type Props = {
-  title?: string; // small label to the right of PocketRocks, optional
+  title?: string; // small label to the right of PocketRocks
   right?: HeaderRight;
 };
 
@@ -47,17 +56,15 @@ export default function AppHeader({ title = "Smart Rocks", right }: Props) {
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-slate-950/80 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-        {/* LEFT: Brand (Hero) */}
+        {/* LEFT: Brand */}
         <div className="flex items-center gap-5">
           <Link href="/dashboard" className="flex items-baseline gap-2">
-            {/* Make PocketRocks the hero on every screen */}
             <span className="leading-none font-extrabold tracking-tight text-4xl sm:text-5xl">
               <span className="text-orange-500">Pocket</span>
               <span className="text-white">Rocks</span>
             </span>
           </Link>
 
-          {/* subtle page/product label */}
           <span className="hidden sm:inline text-sm text-slate-400">{title}</span>
         </div>
 
@@ -67,6 +74,7 @@ export default function AppHeader({ title = "Smart Rocks", right }: Props) {
             <Button
               onClick={() => router.push("/dashboard")}
               disabled={!user || loading || loggingOut}
+              variant={active === "dashboard" ? "primary" : "primary"}
             >
               Dashboard
             </Button>
@@ -74,6 +82,7 @@ export default function AppHeader({ title = "Smart Rocks", right }: Props) {
 
           {showLogout && (
             <Button
+              variant="dangerGhost"
               onClick={handleLogout}
               disabled={!user || loading || loggingOut}
               title={statusLabel ?? "Logout"}

@@ -2,7 +2,7 @@
    FILE: src/app/rocks/new/page.tsx
 
    SCOPE:
-   Rebuild /rocks/new as a true mobile-first data-entry flow:
+   Rebuild /rocks/new as a true mobile-first data-entry flow (Responsive):
    - Collapsed header (no hero)
    - Draft input dominates the viewport
    - Sticky bottom progress
@@ -11,6 +11,10 @@
    BUILD FIX:
    Project saveRock() expects 2 arguments (not 3).
    This page now calls saveRock(rockId, rock).
+
+   BUTTON SYSTEM:
+   - Uses shared <Button> component (no Tailwind orange / hard-coded brand colors)
+   - Crisp, consistent CTA styling managed in one place (src/components/Button.tsx)
 
    ASSUMES:
    - useAuth at "@/lib/useAuth"
@@ -185,19 +189,23 @@ export default function NewRockPage() {
   }
 
   if (loading) {
-    return <div className="min-h-[60vh] flex items-center justify-center text-white/70">Loading…</div>;
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center text-white/70">
+        Loading…
+      </div>
+    );
   }
 
   if (!uid) {
     return (
-      <div className="min-h-[60vh] flex items-center justify-center px-6">
-        <div className="max-w-md w-full rounded-2xl border border-white/10 bg-white/5 p-5">
-          <div className="text-white font-semibold mb-2">Please sign in</div>
-          <div className="text-white/70 text-sm mb-4">You need an account to create Rocks.</div>
-          <Button
-            className="inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold text-white bg-[#FF7900]"
-            onClick={() => router.push("/login")}
-          >
+      <div className="flex min-h-[60vh] items-center justify-center px-6">
+        <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-5">
+          <div className="mb-2 font-semibold text-white">Please sign in</div>
+          <div className="mb-4 text-sm text-white/70">
+            You need an account to create Rocks.
+          </div>
+
+          <Button type="button" className="w-full" onClick={() => router.push("/login")}>
             Go to Login
           </Button>
         </div>
@@ -223,10 +231,14 @@ export default function NewRockPage() {
             setRock((prev: any) => {
               if (!prev) return prev;
               const hasStatement = Object.prototype.hasOwnProperty.call(prev, "statement");
-              return hasStatement ? { ...prev, statement: next } : { ...prev, finalStatement: next };
+              return hasStatement
+                ? { ...prev, statement: next }
+                : { ...prev, finalStatement: next };
             });
           }}
-          onChangeTitle={(next) => setRock((prev: any) => (prev ? { ...prev, title: next } : prev))}
+          onChangeTitle={(next) =>
+            setRock((prev: any) => (prev ? { ...prev, title: next } : prev))
+          }
           onSaveNow={async () => saveNow()}
           onContinue={enterImprove}
         />

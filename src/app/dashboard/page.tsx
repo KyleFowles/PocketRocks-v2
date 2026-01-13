@@ -1,270 +1,169 @@
-/* ============================================================
-   FILE: src/app/dashboard/page.tsx
-
-   SCOPE:
-   Dashboard (PocketRocks)
-   - Uses centralized <Button /> for ALL button-like actions
-   - Removes Tailwind orange button classes (bg-orange-*)
-   - Keeps list cards as <Link> (not buttons)
-   - Make it responsive (mobile-first layout)
-   - Crisp text, clean contrast, no haze regression
-   ============================================================ */
+// FILE: src/app/dashboard/page.tsx
+// SCOPE:
+// - Client-only Dashboard page (prevents Vercel build/SSR crashes)
+// - Loads the signed-in user's Rocks from Firestore
+// - Links to create a new Rock and open an existing Rock
+//
+// WHY THIS FIX:
+// Vercel build was failing with a stack pointing to this file (line ~10).
+// That usually happens when Firebase client code runs during SSR/build.
+// This page is forced client-side and only touches Firestore inside useEffect.
 
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 
 import { useAuth } from "@/lib/useAuth";
-import { listRocks } from "@/lib/rocks";
-import type { Rock, RockStatus } from "@/types/rock";
-import { Button } from "@/components/Button";
+import { getDbClient } from "@/lib/firebase";
 
-type ListItem = Pick<Rock, "id" | "title" | "status" | "dueDate" | "updatedAt">;
+import { collection, getDocs, limit, orderBy, query } from "firebase/firestore";
 
-function statusLabel(s: RockStatus) {
-  return s === "on_track" ? "On Track" : "Off Track";
-}
+type RockRow = {
+  id: string;
+  title: string;
+  dueDate?: string | null;
+  status?: string | null;
+  updatedAt?: any;
+};
 
-function statusPillClass(s: RockStatus) {
-  return s === "on_track"
-    ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-100"
-    : "border-rose-500/25 bg-rose-500/10 text-rose-100";
-}
-
-function formatUpdated(ts: any) {
-  try {
-    if (ts?.toDate) return ts.toDate().toLocaleString();
-    if (typeof ts === "string") return ts;
-    if (ts instanceof Date) return ts.toLocaleString();
-    return "";
-  } catch {
-    return "";
-  }
+function safeText(v: any) {
+  return typeof v === "string" ? v : "";
 }
 
 export default function DashboardPage() {
-  const router = useRouter();
-  const { uid, loading, signOut } = useAuth();
+  const { uid, loading } = useAuth();
 
-  const [includeArchived, setIncludeArchived] = useState(false);
-  const [q, setQ] = useState("");
-  const [rocks, setRocks] = useState<ListItem[]>([]);
-  const [loadingRocks, setLoadingRocks] = useState(true);
-  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [rows, setRows] = useState<RockRow[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+  const [loadingRocks, setLoadingRocks] = useState(false);
 
-  // Auth gate
+  const canLoad = useMemo(() => !loading && Boolean(uid), [loading, uid]);
+
   useEffect(() => {
-    if (!loading && !uid) router.replace("/login");
-  }, [loading, uid, router]);
+    let alive = true;
 
-  // Load rocks
-  useEffect(() => {
-    let cancelled = false;
-
-    async function run() {
-      if (!uid) return;
-
-      const uidStr: string = uid;
+    async function load() {
+      if (!canLoad || !uid) return;
 
       setLoadingRocks(true);
-      setLoadErr(null);
+      setErr(null);
 
       try {
-        const items = (await listRocks(uidStr, { includeArchived })) as any[];
-        const cleaned: ListItem[] = (items || []).map((r: any) => ({
-          id: String(r.id ?? ""),
-          title: String(r.title ?? ""),
-          status: (r.status as RockStatus) ?? "on_track",
-          dueDate: String(r.dueDate ?? ""),
-          updatedAt: r.updatedAt,
-        }));
-        if (!cancelled) setRocks(cleaned);
+        const db = getDbClient();
+        const ref = collection(db, "users", uid, "rocks");
+        const q = query(ref, orderBy("updatedAt", "desc"), limit(50));
+        const snap = await getDocs(q);
+
+        const items: RockRow[] = snap.docs.map((d) => {
+          const data: any = d.data();
+          return {
+            id: d.id,
+            title: safeText(data?.title) || safeText(data?.draft) || "Rock",
+            dueDate: safeText(data?.dueDate) || null,
+            status: safeText(data?.status) || null,
+            updatedAt: data?.updatedAt,
+          };
+        });
+
+        if (alive) setRows(items);
       } catch (e: any) {
-        if (!cancelled) setLoadErr(e?.message || "Failed to load Rocks.");
+        if (alive) setErr(e?.message || "Failed to load Rocks.");
       } finally {
-        if (!cancelled) setLoadingRocks(false);
+        if (alive) setLoadingRocks(false);
       }
     }
 
-    run();
+    load();
+
     return () => {
-      cancelled = true;
+      alive = false;
     };
-  }, [uid, includeArchived]);
-
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    if (!needle) return rocks;
-    return rocks.filter((r) => (r.title || "").toLowerCase().includes(needle));
-  }, [rocks, q]);
-
-  const heroText = useMemo(() => {
-    if (loading) return "Checking sign-in…";
-    if (!uid) return "Checking sign-in…";
-    if (loadingRocks) return "Loading your Rocks…";
-    if (loadErr) return loadErr;
-    if (filtered.length === 0) return q ? "No matches." : "No Rocks yet.";
-    return "";
-  }, [loading, uid, loadingRocks, loadErr, filtered.length, q]);
-
-  async function handleLogout() {
-    try {
-      await signOut();
-      router.replace("/login");
-    } catch {
-      // ignore
-    }
-  }
-
-  function goNewRock() {
-    router.push("/rocks/new");
-  }
-
-  function goMostRecent() {
-    if (!filtered.length) return;
-    router.push(`/rocks/${encodeURIComponent(filtered[0].id)}`);
-  }
-
-  if (!uid) {
-    return (
-      <main className="mx-auto w-full max-w-6xl px-6 py-10">
-        <div className="text-slate-300">{heroText}</div>
-      </main>
-    );
-  }
+  }, [canLoad, uid]);
 
   return (
-    <main className="mx-auto w-full max-w-6xl px-6 py-10">
-      <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
-        <div className="space-y-2">
-          <div className="text-xs font-semibold tracking-widest text-slate-500">WORKSPACE</div>
-          <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">Dashboard</h1>
-          <p className="max-w-xl text-slate-300">Your Rocks. Clear next step. No noise.</p>
+    <main className="mx-auto max-w-4xl px-4 py-8">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+          <p className="mt-1 text-sm text-white/70">
+            Your Rocks live here. Create a new Rock or open an existing one.
+          </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {/* ✅ Was an orange <Link>. Now uses centralized Button palette. */}
-          <Button type="button" onClick={goNewRock}>
-            + New Rock
-          </Button>
-
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => setIncludeArchived((v) => !v)}
-          >
-            {includeArchived ? "Hide archived" : "Show archived"}
-          </Button>
-
-          <Button type="button" variant="danger" onClick={handleLogout}>
-            Logout
-          </Button>
-        </div>
+        <Link
+          href="/rocks/new"
+          className="rounded-xl bg-[var(--orange)] px-4 py-2 text-sm font-semibold text-white shadow-md hover:opacity-95"
+        >
+          + New Rock
+        </Link>
       </div>
 
-      <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_360px]">
-        <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="text-lg font-semibold">Your Rocks</div>
-              <div className="text-sm text-slate-400">{filtered.length} shown</div>
-            </div>
+      <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
+        {loading && <p className="text-sm text-white/70">Checking sign-in…</p>}
 
-            <div className="flex items-center gap-2">
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Search…"
-                className="w-full rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none transition focus:border-sky-300/35 sm:w-72"
-              />
-
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => setQ("")}
-                disabled={!q}
-              >
-                Clear
-              </Button>
-            </div>
+        {!loading && !uid && (
+          <div className="text-sm text-white/70">
+            <p>You’re not signed in.</p>
+            <Link
+              href="/login"
+              className="mt-2 inline-block rounded-xl bg-white/10 px-3 py-2 text-white hover:bg-white/15"
+            >
+              Go to Login
+            </Link>
           </div>
+        )}
 
-          <div className="mt-5 space-y-3">
-            {loadingRocks ? (
-              <div className="text-slate-300">Loading…</div>
-            ) : loadErr ? (
-              <div className="text-rose-200">{loadErr}</div>
-            ) : filtered.length === 0 ? (
-              <div className="text-slate-300">
-                {q ? "No matching Rocks." : "Create your first Rock to get going."}
+        {!loading && uid && (
+          <>
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-white/70">
+                Signed in as <span className="text-white/90">{uid}</span>
+              </p>
+              {loadingRocks && (
+                <p className="text-xs text-white/60">Loading…</p>
+              )}
+            </div>
+
+            {err && (
+              <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                {err}
               </div>
-            ) : (
-              filtered.map((r) => (
-                <Link
-                  key={r.id}
-                  href={`/rocks/${encodeURIComponent(r.id)}`}
-                  className="block rounded-2xl border border-white/10 bg-slate-950/30 p-4 transition hover:bg-slate-950/45"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="truncate text-base font-semibold">
-                        {r.title || "(Untitled Rock)"}
-                      </div>
-                      <div className="mt-1 text-sm text-slate-400">
-                        {r.updatedAt ? `Updated: ${formatUpdated(r.updatedAt)}` : ""}
-                        {r.dueDate ? ` • Due: ${r.dueDate}` : ""}
-                      </div>
-                    </div>
+            )}
 
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`shrink-0 rounded-full border px-3 py-1 text-xs font-semibold ${statusPillClass(
-                          r.status
-                        )}`}
-                      >
-                        {statusLabel(r.status)}
+            <div className="mt-4 divide-y divide-white/10 overflow-hidden rounded-xl border border-white/10">
+              {rows.length === 0 && !loadingRocks ? (
+                <div className="p-4 text-sm text-white/70">
+                  No Rocks yet. Click <b>New Rock</b> to make your first one.
+                </div>
+              ) : (
+                rows.map((r) => (
+                  <Link
+                    key={r.id}
+                    href={`/rocks/${r.id}`}
+                    className="block p-4 hover:bg-white/5"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-white">
+                          {r.title}
+                        </div>
+                        <div className="mt-1 text-xs text-white/60">
+                          {r.status ? `Status: ${r.status}` : "Status: —"}
+                          {" · "}
+                          {r.dueDate ? `Due: ${r.dueDate}` : "Due: —"}
+                        </div>
+                      </div>
+                      <span className="shrink-0 text-xs text-white/50">
+                        Open →
                       </span>
-                      <span className="text-sm text-slate-300">Open →</span>
                     </div>
-                  </div>
-                </Link>
-              ))
-            )}
-          </div>
-        </section>
-
-        <aside className="rounded-2xl border border-white/10 bg-white/5 p-5">
-          <div className="text-sm font-semibold text-slate-200">Next step</div>
-
-          <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/30 p-4">
-            {!filtered.length ? (
-              <div className="text-sm text-slate-300">Create a Rock to start making progress.</div>
-            ) : (
-              <>
-                <div className="text-xs font-semibold tracking-widest text-slate-500">
-                  RECOMMENDED
-                </div>
-                <div className="mt-1 text-base font-semibold">Open your most recent Rock</div>
-                <div className="mt-2 text-sm text-slate-300">
-                  Keep momentum by finishing the next field inside the Rock.
-                </div>
-
-                {/* ✅ Was an orange <Link>. Now uses centralized Button palette. */}
-                <div className="mt-4">
-                  <Button type="button" onClick={goMostRecent}>
-                    Continue →
-                  </Button>
-                </div>
-              </>
-            )}
-          </div>
-
-          <div className="mt-4 text-xs text-slate-500">
-            Tip: The Dashboard should point you to exactly one “next move.”
-          </div>
-        </aside>
+                  </Link>
+                ))
+              )}
+            </div>
+          </>
+        )}
       </div>
     </main>
   );

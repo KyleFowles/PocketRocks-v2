@@ -1,5 +1,3 @@
-"use client";
-
 /* ============================================================
    FILE: src/components/rock/ImproveMode.tsx
 
@@ -8,7 +6,14 @@
    - No editing (prevents competition)
    - One primary action: Apply
    - Sticky bottom progress + optional secondary action
+
+   BUTTON SYSTEM + PALETTE:
+   - Removes hard-coded Tailwind orange from suggestion card + badge
+   - Aligns highlight + recommended badge to the mineral teal button palette
+   - Keeps copy crisp and layout responsive
    ============================================================ */
+
+"use client";
 
 import React, { useMemo, useState } from "react";
 import StickyBottomBar from "@/components/rock/StickyBottomBar";
@@ -80,22 +85,24 @@ export default function ImproveMode(props: {
   }
 
   return (
-    <div className="w-full max-w-3xl mx-auto px-4 pt-4 pb-28">
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-4 mb-4">
-        <div className="text-xs text-white/50 mb-1">Your draft</div>
-        <div className="text-sm text-white font-semibold mb-2">
+    <div className="mx-auto w-full max-w-3xl px-4 pb-28 pt-4">
+      <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+        <div className="mb-1 text-xs text-white/50">Your draft</div>
+        <div className="mb-2 text-sm font-semibold text-white">
           {rockTitle?.trim() ? rockTitle : "Draft Rock"}
         </div>
-        <div className="text-sm text-white/80 whitespace-pre-wrap">
+        <div className="whitespace-pre-wrap text-sm text-white/80">
           {draftText?.trim() ? draftText : "—"}
         </div>
       </div>
 
-      <div className="rounded-2xl border border-[#FF7900]/30 bg-[#FF7900]/10 p-4">
-        <div className="flex items-center justify-between mb-2">
+      {/* Teal-highlighted suggestion card (aligned with primary button palette) */}
+      <div className="rounded-2xl border border-teal-300/25 bg-teal-400/10 p-4">
+        <div className="mb-2 flex items-center justify-between gap-3">
           <div className="text-xs text-white/70">Suggested improvement</div>
+
           {suggestion?.recommended ? (
-            <span className="text-[11px] px-2 py-1 rounded-full bg-[#FF7900] text-white font-semibold">
+            <span className="rounded-full bg-teal-400/25 px-2 py-1 text-[11px] font-semibold text-white ring-1 ring-teal-200/25">
               Recommended
             </span>
           ) : null}
@@ -106,7 +113,7 @@ export default function ImproveMode(props: {
         ) : suggestionError ? (
           <div className="text-sm text-red-200">{suggestionError}</div>
         ) : suggestion?.text ? (
-          <div className="text-sm text-white whitespace-pre-wrap">{suggestion.text}</div>
+          <div className="whitespace-pre-wrap text-sm text-white">{suggestion.text}</div>
         ) : (
           <div className="text-sm text-white/70">No suggestion yet.</div>
         )}

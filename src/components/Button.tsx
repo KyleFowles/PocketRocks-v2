@@ -2,26 +2,41 @@
    FILE: src/components/Button.tsx
 
    SCOPE:
-   Single source of truth for ALL buttons in PocketRocks.
-   - Permanent button palette: GLASS BLUE (bright, translucent, premium)
-   - Harmonizes with the “PocketRocks” name and brand tone (orange brand + blue action)
-   - Make it responsive (mobile-first sizing + full-width on small screens)
-   - World-class SaaS motion timing (snappy, confident)
-   - Crisp, clean text rendering (no fuzz)
-   - Variants: primary | secondary | ghost | danger
-   - Sizes: sm | md | lg
-   - Disabled + loading support
-   - Turbopack-safe (no duplicate symbol names)
+   Single source of truth for ALL buttons and button-like links.
+
+   FINAL POLISH (WORLD-CLASS SAAS):
+   1) Motion timing consistency:
+      - Standardize to duration-150 + ease-out
+      - Consistent hover/active press behavior across variants
+   2) Link vs button consistency:
+      - Add ButtonLink to avoid "Link styled like a button" drift
+      - Same sizing/variants/motion as Button
+   3) Responsive:
+      - Full-width on mobile, auto width on sm+
+
+   VARIANTS:
+   - primary | secondary | ghost | danger | dangerGhost
+
+   SIZES:
+   - sm | md | lg
    ============================================================ */
 
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "dangerGhost";
 type ButtonSize = "sm" | "md" | "lg";
 
 export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+  loading?: boolean;
+};
+
+export type ButtonLinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & {
+  href: string;
   variant?: ButtonVariant;
   size?: ButtonSize;
   loading?: boolean;
@@ -32,30 +47,22 @@ function cx(...parts: Array<string | undefined | false | null>) {
 }
 
 /* ------------------------------------------------------------
-   BASE BUTTON STYLES (APPLIES TO ALL VARIANTS)
+   BASE (applies to Button + ButtonLink)
 ------------------------------------------------------------ */
 const base =
-  // layout
   "inline-flex items-center justify-center gap-2 " +
-  // responsive width: full on small screens, content-width on larger
   "w-full sm:w-auto " +
-  // minimum tap target for mobile
   "min-h-[44px] " +
-  // shape + behavior
   "rounded-[14px] select-none " +
-  // WORLD-CLASS MOTION (FAST, DECISIVE)
-  "transition-[transform,box-shadow,filter,background-color,border-color] duration-150 ease-out " +
-  // focus state (accessible + calm)
-  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/35 " +
-  // disabled behavior
+  // CONSISTENT SAAS MOTION
+  "transition-[transform,box-shadow,filter,background-color,border-color,color] duration-150 ease-out " +
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/35 " +
   "disabled:opacity-60 disabled:cursor-not-allowed " +
-  // mobile polish
   "[-webkit-tap-highlight-color:transparent] " +
-  // CRISP TEXT RENDERING
+  // CRISP TEXT
   "[text-rendering:geometricPrecision] [-webkit-font-smoothing:antialiased] [-moz-osx-font-smoothing:grayscale]";
 
 const sizes: Record<ButtonSize, string> = {
-  // mobile-first spacing, slightly larger on sm+
   sm: "text-sm font-semibold px-3.5 py-2 sm:px-4",
   md: "text-[15px] font-semibold px-5 py-3 sm:px-6",
   lg: "text-[16px] font-semibold px-6 py-3.5 sm:px-7",
@@ -64,59 +71,58 @@ const sizes: Record<ButtonSize, string> = {
 /* ------------------------------------------------------------
    VARIANTS
 ------------------------------------------------------------ */
-
-/**
- * PRIMARY — GLASS BLUE (BRIGHT, TRANSLUCENT)
- * - True "glass" feel using translucent gradients + subtle inner highlight
- * - No blur (keeps text sharp)
- * - Premium depth without neon
- * - Looks great next to orange brand wordmark
- */
-const primaryGlassBlue =
+const primaryMineralTeal =
   "text-white tracking-[0.012em] " +
-  // glassy gradient (translucent)
-  "bg-[linear-gradient(180deg,rgba(255,255,255,0.26),rgba(56,189,248,0.22)_22%,rgba(14,165,233,0.22)_55%,rgba(2,132,199,0.26))] " +
-  // crisp glass edge
-  "border border-sky-200/25 " +
-  // depth + inner highlight (no blur)
-  "shadow-[0_14px_30px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.22)] " +
-  // hover/active: subtle lift + brightness, tactile press
-  "hover:brightness-[1.08] active:brightness-[0.96] " +
+  "bg-[linear-gradient(180deg,rgba(255,255,255,0.10),rgba(20,184,166,1))] " +
+  "border border-teal-200/15 " +
+  "shadow-[0_10px_22px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.10)] " +
+  "hover:brightness-[1.06] active:brightness-[0.96] " +
   "hover:-translate-y-[1px] active:translate-y-[1px] " +
-  "active:shadow-[0_8px_18px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.14)]";
+  "active:shadow-[0_6px_14px_rgba(0,0,0,0.30),inset_0_1px_0_rgba(255,255,255,0.06)]";
 
-const secondaryGlass =
+const secondaryMineral =
   "text-white/90 tracking-[0.01em] " +
-  "border border-white/14 " +
+  "border border-white/12 " +
   "bg-white/6 " +
   "shadow-none " +
   "hover:bg-white/10 " +
   "hover:-translate-y-[1px] active:translate-y-[1px]";
 
-const ghostGlass =
+const ghostMineral =
   "text-white/85 " +
   "border border-transparent " +
   "bg-transparent " +
+  "shadow-none " +
   "hover:bg-white/10 active:bg-white/8";
 
-const dangerGlass =
+const dangerMineral =
   "text-white tracking-[0.01em] " +
-  "border border-red-200/18 " +
-  "bg-[linear-gradient(180deg,rgba(255,255,255,0.14),rgba(239,68,68,0.85))] " +
-  "shadow-[0_12px_26px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.16)] " +
+  "border border-red-200/15 " +
+  "bg-[linear-gradient(180deg,rgba(255,255,255,0.10),rgba(239,68,68,1))] " +
+  "shadow-[0_10px_22px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.10)] " +
   "hover:brightness-[1.05] active:brightness-[0.96] " +
   "hover:-translate-y-[1px] active:translate-y-[1px] " +
-  "active:shadow-[0_7px_16px_rgba(0,0,0,0.30),inset_0_1px_0_rgba(255,255,255,0.10)]";
+  "active:shadow-[0_6px_14px_rgba(0,0,0,0.30),inset_0_1px_0_rgba(255,255,255,0.06)]";
+
+// “Danger, but low weight” (perfect for Logout)
+const dangerGhost =
+  "text-red-200 " +
+  "border border-red-500/25 " +
+  "bg-transparent " +
+  "shadow-none " +
+  "hover:bg-red-500/10 hover:text-red-100 " +
+  "active:bg-red-500/12";
 
 const variants: Record<ButtonVariant, string> = {
-  primary: primaryGlassBlue,
-  secondary: secondaryGlass,
-  ghost: ghostGlass,
-  danger: dangerGlass,
+  primary: primaryMineralTeal,
+  secondary: secondaryMineral,
+  ghost: ghostMineral,
+  danger: dangerMineral,
+  dangerGhost: dangerGhost,
 };
 
 /* ------------------------------------------------------------
-   COMPONENT
+   BUTTON
 ------------------------------------------------------------ */
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   function ButtonInner(
@@ -137,7 +143,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           <>
             <span
               aria-hidden="true"
-              className="h-4 w-4 animate-spin rounded-full border-2 border-white/75 border-t-transparent"
+              className="h-4 w-4 rounded-full border-2 border-white/75 border-t-transparent animate-spin"
             />
             <span className="leading-none">{children}</span>
           </>
@@ -150,3 +156,36 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 );
 
 Button.displayName = "Button";
+
+/* ------------------------------------------------------------
+   BUTTON-LIKE LINK (prevents class drift)
+------------------------------------------------------------ */
+export const ButtonLink = React.forwardRef<HTMLAnchorElement, ButtonLinkProps>(
+  function ButtonLinkInner(
+    { href, className, variant = "primary", size = "md", "aria-disabled": ariaDisabled, children, ...props },
+    ref
+  ) {
+    const disabled = Boolean(ariaDisabled);
+
+    return (
+      <Link
+        ref={ref as any}
+        href={href}
+        aria-disabled={disabled ? true : undefined}
+        tabIndex={disabled ? -1 : props.tabIndex}
+        className={cx(
+          base,
+          sizes[size],
+          variants[variant],
+          disabled ? "pointer-events-none opacity-60" : "",
+          className
+        )}
+        {...props}
+      >
+        <span className="leading-none">{children}</span>
+      </Link>
+    );
+  }
+);
+
+ButtonLink.displayName = "ButtonLink";

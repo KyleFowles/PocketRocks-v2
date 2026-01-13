@@ -318,9 +318,10 @@ export default function RockBuilder(props: {
         .filter((x: AiSuggestion) => Boolean(x.text));
 
       if (items.length && !items.some((x: AiSuggestion) => Boolean(x.recommended))) {
-        items[0].recommended = true;
+        const first = items[0];
+        if (first) first.recommended = true;
       }
-
+      
       setAiSuggestions(items);
       if (!items.length) setAiErr("No suggestions came back. Try again.");
     } catch (e: any) {

@@ -60,7 +60,7 @@ export default function AISuggestionsPanel(props: {
   const [appliedId, setAppliedId] = useState<string | null>(null);
 
   const canGenerate = useMemo(() => {
-    return safeTrim(rock.draft).length >= 8 || safeTrim(rock.finalStatement).length >= 8;
+    return safeTrim((rock as any)?.draft).length >= 8 || safeTrim((rock as any)?.finalStatement).length >= 8;
   }, [rock]);
 
   async function generate() {
@@ -84,8 +84,10 @@ export default function AISuggestionsPanel(props: {
         }))
         .filter((s) => s.text.length > 0);
 
+      // ✅ TS-safe recommended enforcement
       if (items.length > 0 && !items.some((s) => s.recommended)) {
-        items[0].recommended = true;
+        const first = items.at(0);
+        if (first) first.recommended = true;
       }
 
       setSuggestions(items);
@@ -111,9 +113,7 @@ export default function AISuggestionsPanel(props: {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="text-sm font-extrabold text-white">AI Suggestions</div>
-          <div className="text-xs text-slate-300">
-            Generate concise, outcome-based Rock statements.
-          </div>
+          <div className="text-xs text-slate-300">Generate concise, outcome-based Rock statements.</div>
         </div>
 
         <Button
@@ -144,10 +144,7 @@ export default function AISuggestionsPanel(props: {
             const applied = appliedId === s.id;
 
             return (
-              <div
-                key={s.id}
-                className="rounded-xl border border-white/15 bg-black/40 p-3"
-              >
+              <div key={s.id} className="rounded-xl border border-white/15 bg-black/40 p-3">
                 <div className="mb-2 flex flex-wrap items-center gap-2">
                   {s.recommended && (
                     <span className="rounded-full border border-orange-400/50 bg-orange-400/20 px-2 py-1 text-xs font-bold text-white">
@@ -164,11 +161,7 @@ export default function AISuggestionsPanel(props: {
                 <div className="mb-3 text-sm text-white">{s.text}</div>
 
                 <div className="flex justify-end">
-                  <Button
-                    type="button"
-                    onClick={() => applySuggestion(s)}
-                    className="rounded-xl px-3 py-1.5 text-xs font-extrabold text-black"
-                  >
+                  <Button type="button" onClick={() => applySuggestion(s)} className="rounded-xl px-3 py-1.5 text-xs font-extrabold text-black">
                     Apply
                   </Button>
                 </div>
