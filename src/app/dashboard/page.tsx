@@ -1,6 +1,16 @@
-"use client";
+/* ============================================================
+   FILE: src/app/dashboard/page.tsx
 
-// FILE: src/app/dashboard/page.tsx
+   SCOPE:
+   Dashboard (PocketRocks)
+   - Uses centralized <Button /> for ALL button-like actions
+   - Removes Tailwind orange button classes (bg-orange-*)
+   - Keeps list cards as <Link> (not buttons)
+   - Make it responsive (mobile-first layout)
+   - Crisp text, clean contrast, no haze regression
+   ============================================================ */
+
+"use client";
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -56,7 +66,6 @@ export default function DashboardPage() {
     async function run() {
       if (!uid) return;
 
-      // ✅ Make uid a guaranteed string inside the async closure
       const uidStr: string = uid;
 
       setLoadingRocks(true);
@@ -109,6 +118,15 @@ export default function DashboardPage() {
     }
   }
 
+  function goNewRock() {
+    router.push("/rocks/new");
+  }
+
+  function goMostRecent() {
+    if (!filtered.length) return;
+    router.push(`/rocks/${encodeURIComponent(filtered[0].id)}`);
+  }
+
   if (!uid) {
     return (
       <main className="mx-auto w-full max-w-6xl px-6 py-10">
@@ -121,38 +139,26 @@ export default function DashboardPage() {
     <main className="mx-auto w-full max-w-6xl px-6 py-10">
       <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
         <div className="space-y-2">
-          <div className="text-xs font-semibold tracking-widest text-slate-500">
-            WORKSPACE
-          </div>
-          <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
-            Dashboard
-          </h1>
-          <p className="max-w-xl text-slate-300">
-            Your Rocks. Clear next step. No noise.
-          </p>
+          <div className="text-xs font-semibold tracking-widest text-slate-500">WORKSPACE</div>
+          <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">Dashboard</h1>
+          <p className="max-w-xl text-slate-300">Your Rocks. Clear next step. No noise.</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href="/rocks/new"
-            className="rounded-xl bg-orange-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-400"
-          >
+          {/* ✅ Was an orange <Link>. Now uses centralized Button palette. */}
+          <Button type="button" onClick={goNewRock}>
             + New Rock
-          </Link>
-
-          <Button
-            type="button"
-            onClick={() => setIncludeArchived((v) => !v)}
-            className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10" variant="secondary"
-          >
-            {includeArchived ? "Hide archived" : "Show archived"}
           </Button>
 
           <Button
             type="button"
-            onClick={handleLogout}
-            className="rounded-xl border border-red-500/25 px-4 py-2 text-sm font-medium text-red-100 transition hover:" variant="danger"
+            variant="secondary"
+            onClick={() => setIncludeArchived((v) => !v)}
           >
+            {includeArchived ? "Hide archived" : "Show archived"}
+          </Button>
+
+          <Button type="button" variant="danger" onClick={handleLogout}>
             Logout
           </Button>
         </div>
@@ -171,13 +177,14 @@ export default function DashboardPage() {
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Search…"
-                className="w-full rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none transition focus:border-orange-500/40 sm:w-72"
+                className="w-full rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none transition focus:border-sky-300/35 sm:w-72"
               />
+
               <Button
                 type="button"
+                variant="secondary"
                 onClick={() => setQ("")}
-                className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
-                disabled={!q} variant="secondary"
+                disabled={!q}
               >
                 Clear
               </Button>
@@ -233,27 +240,23 @@ export default function DashboardPage() {
 
           <div className="mt-3 rounded-2xl border border-white/10 bg-slate-950/30 p-4">
             {!filtered.length ? (
-              <div className="text-sm text-slate-300">
-                Create a Rock to start making progress.
-              </div>
+              <div className="text-sm text-slate-300">Create a Rock to start making progress.</div>
             ) : (
               <>
                 <div className="text-xs font-semibold tracking-widest text-slate-500">
                   RECOMMENDED
                 </div>
-                <div className="mt-1 text-base font-semibold">
-                  Open your most recent Rock
-                </div>
+                <div className="mt-1 text-base font-semibold">Open your most recent Rock</div>
                 <div className="mt-2 text-sm text-slate-300">
                   Keep momentum by finishing the next field inside the Rock.
                 </div>
 
-                <Link
-                  href={`/rocks/${encodeURIComponent(filtered[0].id)}`}
-                  className="mt-4 inline-flex w-full items-center justify-center rounded-xl bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-orange-400"
-                >
-                  Continue →
-                </Link>
+                {/* ✅ Was an orange <Link>. Now uses centralized Button palette. */}
+                <div className="mt-4">
+                  <Button type="button" onClick={goMostRecent}>
+                    Continue →
+                  </Button>
+                </div>
               </>
             )}
           </div>
