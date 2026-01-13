@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/useAuth";
 import { listRocks } from "@/lib/rocks";
 import type { Rock, RockStatus } from "@/types/rock";
+import { Button } from "@/components/Button";
 
 type ListItem = Pick<Rock, "id" | "title" | "status" | "dueDate" | "updatedAt">;
 
@@ -139,21 +140,21 @@ export default function DashboardPage() {
             + New Rock
           </Link>
 
-          <button
+          <Button
             type="button"
             onClick={() => setIncludeArchived((v) => !v)}
-            className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+            className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10" variant="secondary"
           >
             {includeArchived ? "Hide archived" : "Show archived"}
-          </button>
+          </Button>
 
-          <button
+          <Button
             type="button"
             onClick={handleLogout}
-            className="rounded-xl border border-red-500/25 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-100 transition hover:bg-red-500/20"
+            className="rounded-xl border border-red-500/25 px-4 py-2 text-sm font-medium text-red-100 transition hover:" variant="danger"
           >
             Logout
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -172,14 +173,14 @@ export default function DashboardPage() {
                 placeholder="Search…"
                 className="w-full rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none transition focus:border-orange-500/40 sm:w-72"
               />
-              <button
+              <Button
                 type="button"
                 onClick={() => setQ("")}
                 className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
-                disabled={!q}
+                disabled={!q} variant="secondary"
               >
                 Clear
-              </button>
+              </Button>
             </div>
           </div>
 

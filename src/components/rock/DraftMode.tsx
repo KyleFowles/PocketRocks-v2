@@ -21,6 +21,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import StickyBottomBar from "@/components/rock/StickyBottomBar";
+import { Button } from "@/components/Button";
 
 export default function DraftMode(props: {
   draft: string;
@@ -152,13 +153,13 @@ export default function DraftMode(props: {
 
           {canShowDetails ? (
             <div className="mt-4">
-              <button
+              <Button
                 type="button"
                 onClick={() => setShowDetails((s) => !s)}
                 className="text-sm text-white/70 hover:text-white transition"
               >
                 {showDetails ? "Hide details" : "Add details (optional)"}
-              </button>
+              </Button>
 
               {showDetails ? (
                 <div className="mt-3">

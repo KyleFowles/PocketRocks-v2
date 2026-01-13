@@ -2,15 +2,46 @@
    FILE: src/app/globals.css
 
    SCOPE:
-   Global styling + Tailwind directives.
+   PocketRocks Global Styles — BLUE PRIMARY ACTION (LOCKED)
    - Tailwind v4 compatible
-   - Provides PocketRocks dark base look
+   - Dark, modern UI
+   - Bright, translucent blue "Continue" button
+   - Force overrides Tailwind bg-* utilities
    ============================================================ */
 
 @import "tailwindcss";
 
+/* ------------------------------------------------------------
+   CSS VARIABLES
+------------------------------------------------------------ */
 :root {
   color-scheme: dark;
+
+  /* BACKGROUNDS */
+  --bg-main: #0b1220;
+  --bg-panel: #121b33;
+  --bg-panel-soft: #1b2747;
+
+  --border-subtle: #2a3a63;
+
+  /* TEXT */
+  --text-main: #f8fafc;
+  --text-muted: #c7d2fe;
+
+  /* PRIMARY ACTION — GLASS BLUE */
+  --blue-main: rgba(56, 189, 248, 0.85);
+  --blue-hover: rgba(96, 207, 255, 0.95);
+  --blue-active: rgba(14, 165, 233, 0.95);
+  --blue-glow: rgba(56, 189, 248, 0.55);
+}
+
+/* ------------------------------------------------------------
+   BASE RESET
+------------------------------------------------------------ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
 
 html,
@@ -20,10 +51,161 @@ body {
 
 body {
   margin: 0;
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji",
-    "Segoe UI Emoji";
-  background: radial-gradient(1200px 600px at 20% 0%, rgba(255, 121, 0, 0.14), rgba(0, 0, 0, 0) 55%),
-    radial-gradient(900px 500px at 80% 10%, rgba(20, 34, 51, 0.55), rgba(0, 0, 0, 0) 60%),
-    linear-gradient(180deg, #0b1220 0%, #050810 100%);
-  color: rgba(255, 255, 255, 0.92);
+  background: radial-gradient(
+      1100px 600px at 50% -200px,
+      #1e2a4d,
+      var(--bg-main)
+    );
+  color: var(--text-main);
+
+  font-family: system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  font-size: 16px;
+  line-height: 1.55;
+
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ------------------------------------------------------------
+   PANELS / CARDS
+------------------------------------------------------------ */
+.panel {
+  background: linear-gradient(
+    180deg,
+    var(--bg-panel-soft),
+    var(--bg-panel)
+  );
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  box-shadow:
+    0 12px 34px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* ------------------------------------------------------------
+   PRIMARY BUTTON — CONTINUE (FORCED OVERRIDE)
+------------------------------------------------------------ */
+.btn-primary {
+  appearance: none !important;
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  border-radius: 14px !important;
+
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.25),
+    var(--blue-main)
+  ) !important;
+
+  backdrop-filter: blur(6px) !important;
+  -webkit-backdrop-filter: blur(6px) !important;
+
+  color: #ffffff !important;
+
+  font-size: 16px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.015em !important;
+
+  padding: 14px 26px !important;
+
+  cursor: pointer !important;
+
+  box-shadow:
+    0 10px 30px var(--blue-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55) !important;
+
+  transition:
+    transform 0.08s ease,
+    box-shadow 0.2s ease,
+    filter 0.2s ease !important;
+
+  text-rendering: optimizeLegibility !important;
+}
+
+.btn-primary:hover {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.35),
+    var(--blue-hover)
+  ) !important;
+  transform: translateY(-1px) !important;
+}
+
+.btn-primary:active {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.15),
+    var(--blue-active)
+  ) !important;
+  transform: translateY(1px) !important;
+  box-shadow:
+    0 5px 16px var(--blue-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
+}
+
+.btn-primary:disabled {
+  opacity: 0.5 !important;
+  cursor: not-allowed !important;
+  box-shadow: none !important;
+}
+
+/* ------------------------------------------------------------
+   SECONDARY BUTTON
+------------------------------------------------------------ */
+.btn-secondary {
+  appearance: none;
+  border-radius: 12px;
+  border: 1px solid var(--border-subtle);
+
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-main);
+
+  padding: 12px 20px;
+  font-size: 15px;
+  font-weight: 600;
+
+  cursor: pointer;
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* ------------------------------------------------------------
+   FORM ELEMENTS
+------------------------------------------------------------ */
+input,
+textarea,
+select {
+  background: #0b1220;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+
+  color: var(--text-main);
+  font-size: 15px;
+
+  padding: 11px 13px;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-muted);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--blue-main);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.35);
+}
+
+/* ------------------------------------------------------------
+   UTILITIES
+------------------------------------------------------------ */
+.center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }

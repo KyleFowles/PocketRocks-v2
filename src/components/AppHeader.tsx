@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { useAuth } from "@/lib/useAuth";
 import { logout } from "@/lib/auth";
+import { Button } from "@/components/Button";
 
 type HeaderRight = {
   active?: "dashboard" | "none";
@@ -63,37 +64,22 @@ export default function AppHeader({ title = "Smart Rocks", right }: Props) {
         {/* RIGHT: Actions */}
         <div className="flex items-center gap-2">
           {showDashboard && (
-            <button
+            <Button
               onClick={() => router.push("/dashboard")}
-              className={[
-                "rounded-xl px-4 py-2 text-sm font-medium transition",
-                "disabled:cursor-not-allowed disabled:opacity-60",
-                "border border-white/10",
-                // keep Dashboard clean + professional (not screaming)
-                active === "dashboard"
-                  ? "bg-white/7 text-slate-100"
-                  : "bg-white/5 text-slate-200 hover:bg-white/10",
-              ].join(" ")}
               disabled={!user || loading || loggingOut}
             >
               Dashboard
-            </button>
+            </Button>
           )}
 
           {showLogout && (
-            <button
+            <Button
               onClick={handleLogout}
-              className={[
-                "rounded-xl px-4 py-2 text-sm font-medium transition",
-                "disabled:cursor-not-allowed disabled:opacity-60",
-                // cleaner, restrained “danger” feel (like your screenshot)
-                "border border-red-500/25 bg-red-500/10 text-red-100 hover:bg-red-500/18",
-              ].join(" ")}
               disabled={!user || loading || loggingOut}
               title={statusLabel ?? "Logout"}
             >
               {statusLabel ?? "Logout"}
-            </button>
+            </Button>
           )}
         </div>
       </div>

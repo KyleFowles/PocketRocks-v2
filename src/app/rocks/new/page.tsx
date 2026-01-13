@@ -30,6 +30,7 @@ import ImproveMode, { type ImproveSuggestion } from "@/components/rock/ImproveMo
 import { useAuth } from "@/lib/useAuth";
 import { saveRock } from "@/lib/rocks";
 import type { Rock } from "@/types/rock";
+import { Button } from "@/components/Button";
 
 type Mode = "draft" | "improve";
 
@@ -193,12 +194,12 @@ export default function NewRockPage() {
         <div className="max-w-md w-full rounded-2xl border border-white/10 bg-white/5 p-5">
           <div className="text-white font-semibold mb-2">Please sign in</div>
           <div className="text-white/70 text-sm mb-4">You need an account to create Rocks.</div>
-          <button
+          <Button
             className="inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold text-white bg-[#FF7900]"
             onClick={() => router.push("/login")}
           >
             Go to Login
-          </button>
+          </Button>
         </div>
       </div>
     );

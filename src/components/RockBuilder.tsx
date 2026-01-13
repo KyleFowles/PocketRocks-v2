@@ -3,6 +3,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { Metric, Milestone, Rock } from "@/types/rock";
+import { Button } from "@/components/Button";
 
 type Step = 1 | 2 | 3 | 4 | 5;
 
@@ -431,9 +432,9 @@ export default function RockBuilder(props: {
               Answer each one in simple words. These answers become your Rock’s backbone.
             </p>
 
-            <button type="button" onClick={buildFinalStatement} style={btnPrimary}>
+            <Button type="button" onClick={buildFinalStatement} style={btnPrimary}>
               Build Final Statement
-            </button>
+            </Button>
           </div>
 
           <Field label="Specific — What exactly will be different when this is done?">
@@ -500,9 +501,9 @@ export default function RockBuilder(props: {
           <p style={muted}>Add 1–3 measures that prove success. Keep it simple.</p>
 
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
-            <button type="button" onClick={addMetric} style={btnPrimary}>
+            <Button type="button" onClick={addMetric} style={btnPrimary}>
               + Add Metric
-            </button>
+            </Button>
             <div style={mutedSmall}>At least 1 metric is required.</div>
           </div>
 
@@ -542,9 +543,9 @@ export default function RockBuilder(props: {
                   </div>
 
                   <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
-                    <button type="button" onClick={() => removeMetric(m.id)} style={btnGhost}>
+                    <Button type="button" onClick={() => removeMetric(m.id)} style={btnGhost}>
                       Remove
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ))}
@@ -558,9 +559,9 @@ export default function RockBuilder(props: {
           <p style={muted}>Add 3–7 milestones. Make them concrete actions.</p>
 
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
-            <button type="button" onClick={addMilestone} style={btnPrimary}>
+            <Button type="button" onClick={addMilestone} style={btnPrimary}>
               + Add Milestone
-            </button>
+            </Button>
             <div style={mutedSmall}>At least 3 milestones are required.</div>
           </div>
 
@@ -600,9 +601,9 @@ export default function RockBuilder(props: {
                   </div>
 
                   <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
-                    <button type="button" onClick={() => removeMilestone(m.id)} style={btnGhost}>
+                    <Button type="button" onClick={() => removeMilestone(m.id)} style={btnGhost}>
                       Remove
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ))}
@@ -623,12 +624,12 @@ export default function RockBuilder(props: {
               </div>
 
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                <button type="button" onClick={generateSuggestions} style={btnPrimary} disabled={aiBusy}>
+                <Button type="button" onClick={generateSuggestions} style={btnPrimary} disabled={aiBusy}>
                   {aiBusy ? "Generating…" : aiSuggestions.length ? "Regenerate" : "Generate Suggestions"}
-                </button>
-                <button type="button" onClick={buildFinalStatement} style={btnGhost}>
+                </Button>
+                <Button type="button" onClick={buildFinalStatement} style={btnGhost}>
                   Build from SMART
-                </button>
+                </Button>
               </div>
             </div>
 
@@ -636,9 +637,9 @@ export default function RockBuilder(props: {
               <div style={followupBox}>
                 <div style={{ fontWeight: 800, marginBottom: 6 }}>Quick question</div>
                 <div style={{ marginBottom: 10 }}>{followup}</div>
-                <button type="button" onClick={() => setStep(1)} style={btnGhost}>
+                <Button type="button" onClick={() => setStep(1)} style={btnGhost}>
                   Go to Draft
-                </button>
+                </Button>
               </div>
             )}
 
@@ -666,9 +667,9 @@ export default function RockBuilder(props: {
                         </div>
 
                         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                          <button type="button" onClick={() => applySuggestion(s)} style={btnPrimary}>
+                          <Button type="button" onClick={() => applySuggestion(s)} style={btnPrimary}>
                             Apply
-                          </button>
+                          </Button>
                         </div>
                       </div>
                     </div>
@@ -772,30 +773,30 @@ export default function RockBuilder(props: {
       <div style={footer}>
         <div style={{ display: "flex", gap: 10 }}>
           {props.onCancel && (
-            <button type="button" onClick={props.onCancel} style={btnGhost} disabled={busy}>
+            <Button type="button" onClick={props.onCancel} style={btnGhost} disabled={busy}>
               Cancel
-            </button>
+            </Button>
           )}
         </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <button type="button" onClick={back} style={btnGhost} disabled={busy || step === 1}>
+          <Button type="button" onClick={back} style={btnGhost} disabled={busy || step === 1}>
             Back
-          </button>
+          </Button>
 
           {step < 5 ? (
-            <button
+            <Button
               type="button"
               onClick={next}
               style={canContinue ? btnPrimary : btnDisabled}
               disabled={!canContinue || busy}
             >
               Continue
-            </button>
+            </Button>
           ) : (
-            <button type="button" onClick={saveNow} style={btnPrimary} disabled={busy}>
+            <Button type="button" onClick={saveNow} style={btnPrimary} disabled={busy}>
               {busy ? "Saving..." : "Save Rock"}
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -827,7 +828,7 @@ function StepHeader(props: { step: Step; onStepClick: (step: Step) => void }) {
         {steps.map((s) => {
           const active = s.n === props.step;
           return (
-            <button
+            <Button
               key={s.n}
               type="button"
               onClick={() => props.onStepClick(s.n)}
@@ -835,7 +836,7 @@ function StepHeader(props: { step: Step; onStepClick: (step: Step) => void }) {
               aria-current={active ? "step" : undefined}
             >
               {s.n}. {s.label}
-            </button>
+            </Button>
           );
         })}
       </div>

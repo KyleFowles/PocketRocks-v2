@@ -20,6 +20,7 @@ import { GoogleAuthProvider, signInAnonymously, signInWithPopup } from "firebase
 
 import { useAuth } from "@/lib/useAuth";
 import { getAuthClient } from "@/lib/firebase";
+import { Button } from "@/components/Button";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -108,23 +109,23 @@ export default function LoginPage() {
             )}
 
             <div className="grid gap-3">
-              <button
+              <Button
                 type="button"
                 onClick={handleGoogle}
                 disabled={busy}
-                className="rounded-xl bg-orange-500 px-4 py-3 text-sm font-extrabold text-slate-950 hover:bg-orange-400 disabled:opacity-60"
+                className="rounded-xl px-4 py-3 text-sm font-extrabold text-slate-950 hover: disabled:opacity-60"
               >
                 {busy ? "Working…" : "Continue with Google"}
-              </button>
+              </Button>
 
-              <button
+              <Button
                 type="button"
                 onClick={handleAnonymous}
                 disabled={busy}
-                className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-semibold text-slate-200 hover:bg-slate-800 disabled:opacity-60"
+                className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-semibold text-slate-200 hover:bg-slate-800 disabled:opacity-60" variant="secondary"
               >
                 {busy ? "Working…" : "Continue as Guest"}
-              </button>
+              </Button>
             </div>
 
             <div className="mt-4 text-xs text-slate-400">
