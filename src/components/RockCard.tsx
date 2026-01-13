@@ -3,6 +3,7 @@
 
 import React from "react";
 import type { Rock } from "@/types/rock";
+import { Button } from "@/components/Button";
 
 export default function RockCard(props: {
   rock: Rock;
@@ -20,10 +21,10 @@ export default function RockCard(props: {
   }
 
   return (
-    <button
+    <Button
       type="button"
       onClick={handleClick}
-      className="w-full rounded-2xl border border-slate-800 bg-slate-950 p-4 text-left shadow-sm hover:bg-slate-900"
+      className="w-full rounded-2xl border border-slate-800 bg-slate-950 p-4 text-left shadow-sm hover:bg-slate-900" variant="secondary"
     >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
@@ -44,6 +45,6 @@ export default function RockCard(props: {
 
         {props.rightSlot ? <div className="shrink-0">{props.rightSlot}</div> : null}
       </div>
-    </button>
+    </Button>
   );
 }

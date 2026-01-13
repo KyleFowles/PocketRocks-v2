@@ -4,6 +4,7 @@
 
 import React, { useMemo, useState } from "react";
 import type { Rock } from "@/types/rock";
+import { Button } from "@/components/Button";
 
 type AiSuggestion = {
   id: string;
@@ -115,14 +116,14 @@ export default function AISuggestionsPanel(props: {
           </div>
         </div>
 
-        <button
+        <Button
           type="button"
           onClick={generate}
           disabled={busy || !canGenerate}
-          className="rounded-xl bg-orange-500 px-4 py-2 text-sm font-extrabold text-black disabled:opacity-50"
+          className="rounded-xl px-4 py-2 text-sm font-extrabold text-black disabled:opacity-50"
         >
           {busy ? "Generating…" : suggestions.length ? "Regenerate" : "Generate"}
-        </button>
+        </Button>
       </div>
 
       {error && (
@@ -163,13 +164,13 @@ export default function AISuggestionsPanel(props: {
                 <div className="mb-3 text-sm text-white">{s.text}</div>
 
                 <div className="flex justify-end">
-                  <button
+                  <Button
                     type="button"
                     onClick={() => applySuggestion(s)}
-                    className="rounded-xl bg-orange-500 px-3 py-1.5 text-xs font-extrabold text-black"
+                    className="rounded-xl px-3 py-1.5 text-xs font-extrabold text-black"
                   >
                     Apply
-                  </button>
+                  </Button>
                 </div>
               </div>
             );

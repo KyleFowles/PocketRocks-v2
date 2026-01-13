@@ -2,223 +2,210 @@
    FILE: src/app/globals.css
 
    SCOPE:
-   Global styling for PocketRocks
-   - Crisp text hierarchy
-   - Panel styles
-   - Sticky footer bar (no overlap, not tall)
+   PocketRocks Global Styles — BLUE PRIMARY ACTION (LOCKED)
+   - Tailwind v4 compatible
+   - Dark, modern UI
+   - Bright, translucent blue "Continue" button
+   - Force overrides Tailwind bg-* utilities
    ============================================================ */
 
 @import "tailwindcss";
 
+/* ------------------------------------------------------------
+   CSS VARIABLES
+------------------------------------------------------------ */
 :root {
   color-scheme: dark;
 
-  /* Backgrounds */
-  --pr-bg: #0b1220;
-  --pr-bg-2: #08101d;
+  /* BACKGROUNDS */
+  --bg-main: #0b1220;
+  --bg-panel: #121b33;
+  --bg-panel-soft: #1b2747;
+
+  --border-subtle: #2a3a63;
 
   /* TEXT */
-  --pr-white: #ffffff;
-  --pr-text: #f5f7fa;
-  --pr-muted: #b6c0d1;
-  --pr-muted-soft: #9aa6bb;
+  --text-main: #f8fafc;
+  --text-muted: #c7d2fe;
 
-  /* Borders */
-  --pr-border: rgba(229, 232, 235, 0.14);
-  --pr-border-strong: rgba(229, 232, 235, 0.22);
+  /* PRIMARY ACTION — GLASS BLUE */
+  --blue-main: rgba(56, 189, 248, 0.85);
+  --blue-hover: rgba(96, 207, 255, 0.95);
+  --blue-active: rgba(14, 165, 233, 0.95);
+  --blue-glow: rgba(56, 189, 248, 0.55);
+}
 
-  /* Brand */
-  --pr-orange: #ff7900;          /* header */
-  --pr-orange-cta: #f04e23;      /* button base */
-  --pr-orange-cta-hover: #ff7900;
-
-  /* Neutral disabled */
-  --pr-disabled-bg: #2a3447;
-  --pr-disabled-border: rgba(255, 255, 255, 0.10);
-  --pr-disabled-text: rgba(255, 255, 255, 0.72);
-
-  /* Focus */
-  --pr-focus: rgba(255, 121, 0, 0.45);
+/* ------------------------------------------------------------
+   BASE RESET
+------------------------------------------------------------ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
 
 html,
 body {
-  background-color: var(--pr-bg);
-  color: var(--pr-text);
-  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont,
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(
+      1100px 600px at 50% -200px,
+      #1e2a4d,
+      var(--bg-main)
+    );
+  color: var(--text-main);
+
+  font-family: system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-}
 
-/* -------------------------
-   Header Accent
-------------------------- */
-.pr-header-accent {
-  color: var(--pr-orange);
-  font-weight: 800;
-  letter-spacing: 0.2px;
-}
-
-/* -------------------------
-   Page Backdrop
-------------------------- */
-.pr-page {
-  min-height: 100vh;
-  background:
-    radial-gradient(900px 400px at 50% 0%, rgba(255, 121, 0, 0.10), transparent 60%),
-    radial-gradient(800px 500px at 10% 30%, rgba(68, 87, 119, 0.18), transparent 55%),
-    radial-gradient(700px 500px at 90% 55%, rgba(20, 34, 51, 0.55), transparent 60%),
-    linear-gradient(180deg, var(--pr-bg-2), var(--pr-bg));
-}
-
-/* -------------------------
-   Shell layout (prevents footer overlap)
-------------------------- */
-.pr-shell {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
-
-/* -------------------------
-   Panel / Card
-------------------------- */
-.pr-panel {
-  background: linear-gradient(180deg, rgba(19, 35, 66, 0.78), rgba(15, 26, 47, 0.74));
-  border: 1px solid var(--pr-border-strong);
-  border-radius: 18px;
-  box-shadow:
-    0 18px 60px rgba(0, 0, 0, 0.55),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(10px);
-}
-
-/* -------------------------
-   Labels
-------------------------- */
-.pr-label {
-  color: var(--pr-muted);
-  font-size: 13px;
-  letter-spacing: 0.3px;
-}
-
-/* -------------------------
-   Textareas
-------------------------- */
-.pr-textarea {
-  width: 100%;
-  resize: vertical;
-
-  background: rgba(6, 10, 18, 0.65);
-  border: 1px solid var(--pr-border);
-  border-radius: 14px;
-
-  color: var(--pr-white);
-  padding: 14px;
-
-  outline: none;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-}
-
-.pr-textarea:focus {
-  border-color: rgba(255, 121, 0, 0.55);
-  box-shadow:
-    0 0 0 4px var(--pr-focus),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
-}
-
-.pr-textarea::placeholder {
-  color: var(--pr-muted-soft);
-}
-
-/* -------------------------
-   Alerts
-------------------------- */
-.pr-alert {
-  color: #ffd7c2;
-  font-size: 13px;
-}
-
-/* -------------------------
-   Primary CTA Button
-------------------------- */
-.pr-primary-button {
-  background-color: var(--pr-orange-cta);
-  color: var(--pr-white);
-
-  font-weight: 700;
   font-size: 16px;
-  line-height: 1;
+  line-height: 1.55;
 
-  padding: 12px 24px;
-  border-radius: 12px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
 
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  outline: none;
-
-  cursor: pointer;
-
+/* ------------------------------------------------------------
+   PANELS / CARDS
+------------------------------------------------------------ */
+.panel {
+  background: linear-gradient(
+    180deg,
+    var(--bg-panel-soft),
+    var(--bg-panel)
+  );
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
   box-shadow:
-    0 10px 22px rgba(0, 0, 0, 0.40),
-    inset 0 1px 0 rgba(255, 255, 255, 0.10);
-
-  transition:
-    background-color 0.15s ease,
-    transform 0.05s ease,
-    box-shadow 0.15s ease;
+    0 12px 34px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
-.pr-primary-button:hover {
-  background-color: var(--pr-orange-cta-hover);
-}
-
-.pr-primary-button:active {
-  transform: translateY(1px);
-}
-
-.pr-primary-button:focus-visible {
-  box-shadow:
-    0 0 0 4px var(--pr-focus),
-    0 14px 30px rgba(0, 0, 0, 0.50),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
-}
-
-.pr-primary-button:disabled {
-  background-color: var(--pr-disabled-bg);
-  color: var(--pr-disabled-text);
-  border-color: var(--pr-disabled-border);
-  cursor: not-allowed;
-  box-shadow: none;
-}
-
-/* -------------------------
-   Sticky Footer (short + no overlap)
-------------------------- */
-.pr-footer-dock {
-  position: sticky;
-  bottom: 0;
-  left: 0;
-  right: 0;
-
-  padding: 10px 14px;
+/* ------------------------------------------------------------
+   PRIMARY BUTTON — CONTINUE (FORCED OVERRIDE)
+------------------------------------------------------------ */
+.btn-primary {
+  appearance: none !important;
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  border-radius: 14px !important;
 
   background: linear-gradient(
     180deg,
-    rgba(8, 16, 29, 0.15),
-    rgba(8, 16, 29, 0.88)
-  );
-  border-top: 1px solid rgba(255, 255, 255, 0.10);
-  backdrop-filter: blur(10px);
+    rgba(255, 255, 255, 0.25),
+    var(--blue-main)
+  ) !important;
+
+  backdrop-filter: blur(6px) !important;
+  -webkit-backdrop-filter: blur(6px) !important;
+
+  color: #ffffff !important;
+
+  font-size: 16px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.015em !important;
+
+  padding: 14px 26px !important;
+
+  cursor: pointer !important;
+
+  box-shadow:
+    0 10px 30px var(--blue-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55) !important;
+
+  transition:
+    transform 0.08s ease,
+    box-shadow 0.2s ease,
+    filter 0.2s ease !important;
+
+  text-rendering: optimizeLegibility !important;
 }
 
-.pr-footer-inner {
-  max-width: 980px;
-  margin: 0 auto;
+.btn-primary:hover {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.35),
+    var(--blue-hover)
+  ) !important;
+  transform: translateY(-1px) !important;
+}
 
+.btn-primary:active {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.15),
+    var(--blue-active)
+  ) !important;
+  transform: translateY(1px) !important;
+  box-shadow:
+    0 5px 16px var(--blue-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
+}
+
+.btn-primary:disabled {
+  opacity: 0.5 !important;
+  cursor: not-allowed !important;
+  box-shadow: none !important;
+}
+
+/* ------------------------------------------------------------
+   SECONDARY BUTTON
+------------------------------------------------------------ */
+.btn-secondary {
+  appearance: none;
+  border-radius: 12px;
+  border: 1px solid var(--border-subtle);
+
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-main);
+
+  padding: 12px 20px;
+  font-size: 15px;
+  font-weight: 600;
+
+  cursor: pointer;
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* ------------------------------------------------------------
+   FORM ELEMENTS
+------------------------------------------------------------ */
+input,
+textarea,
+select {
+  background: #0b1220;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+
+  color: var(--text-main);
+  font-size: 15px;
+
+  padding: 11px 13px;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-muted);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--blue-main);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.35);
+}
+
+/* ------------------------------------------------------------
+   UTILITIES
+------------------------------------------------------------ */
+.center {
   display: flex;
-  flex-direction: column;
   align-items: center;
-
-  gap: 8px; /* tighter */
+  justify-content: center;
 }

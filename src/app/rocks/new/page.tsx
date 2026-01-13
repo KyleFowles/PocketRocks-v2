@@ -2,141 +2,246 @@
    FILE: src/app/rocks/new/page.tsx
 
    SCOPE:
-   Create Rock (Step 1)
-   - Hero header
-   - Flex shell + sticky footer (no overlap)
-   - Shorter textareas
+   Rebuild /rocks/new as a true mobile-first data-entry flow:
+   - Collapsed header (no hero)
+   - Draft input dominates the viewport
+   - Sticky bottom progress
+   - Improve mode uses the same pattern
+
+   BUILD FIX:
+   Project saveRock() expects 2 arguments (not 3).
+   This page now calls saveRock(rockId, rock).
+
+   ASSUMES:
+   - useAuth at "@/lib/useAuth"
+   - saveRock at "@/lib/rocks" supports (rockId, rock)
+   - /api/rock-suggest endpoint exists
    ============================================================ */
 
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+
+import CollapsedHeader from "@/components/rock/CollapsedHeader";
+import DraftMode from "@/components/rock/DraftMode";
+import ImproveMode, { type ImproveSuggestion } from "@/components/rock/ImproveMode";
 
 import { useAuth } from "@/lib/useAuth";
 import { saveRock } from "@/lib/rocks";
 import type { Rock } from "@/types/rock";
+import { Button } from "@/components/Button";
+
+type Mode = "draft" | "improve";
+
+async function fetchSuggestion(text: string): Promise<string> {
+  const res = await fetch("/api/rock-suggest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) throw new Error("suggest_failed");
+  const data = await res.json();
+
+  const first =
+    (Array.isArray(data?.suggestions) ? data.suggestions[0] : null) ??
+    (typeof data?.suggestion === "string" ? data.suggestion : null) ??
+    (typeof data?.text === "string" ? data.text : null);
+
+  const cleaned = typeof first === "string" ? first.trim() : "";
+  if (!cleaned) throw new Error("empty_suggestion");
+  return cleaned;
+}
+
+function newId(): string {
+  if (typeof crypto !== "undefined" && typeof (crypto as any).randomUUID === "function") {
+    return (crypto as any).randomUUID();
+  }
+  return `rock_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
 
 export default function NewRockPage() {
   const router = useRouter();
   const { uid, loading } = useAuth();
 
-  const [draft, setDraft] = useState("");
-  const [details, setDetails] = useState("");
-  const [err, setErr] = useState<string | null>(null);
+  const [mode, setMode] = useState<Mode>("draft");
+
+  const [rockId, setRockId] = useState<string | null>(null);
+  const [rock, setRock] = useState<Rock | null>(null);
+
   const [saving, setSaving] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
 
-  const canContinue = useMemo(() => {
-    return draft.trim().length >= 3 && !saving && !loading;
-  }, [draft, saving, loading]);
+  const [suggestion, setSuggestion] = useState<ImproveSuggestion | null>(null);
+  const [loadingSuggestion, setLoadingSuggestion] = useState(false);
+  const [suggestionError, setSuggestionError] = useState<string | null>(null);
 
-  async function onContinue() {
-    setErr(null);
+  // Minimal “new rock” initialization
+  useEffect(() => {
+    if (!uid) return;
 
-    const cleaned = draft.trim();
-    if (cleaned.length < 3) {
-      setErr("Please enter your Rock first.");
-      return;
-    }
-    if (!uid) {
-      setErr("You are not signed in. Please log in again.");
-      return;
-    }
+    setRockId((prev) => prev ?? newId());
 
-    try {
-      setSaving(true);
+    setRock((prev) => {
+      if (prev) return prev;
 
-      const newRock: Partial<Rock> = {
-        title: cleaned,
-        // @ts-ignore
-        details: details.trim() || "",
-        // @ts-ignore
-        status: "draft",
+      const initial: any = {
+        title: "",
+        statement: "",
+        status: "on-track",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
       };
 
-      const result: any = await saveRock(uid, newRock as Rock);
+      return initial as Rock;
+    });
+  }, [uid]);
 
-      const rockId =
-        typeof result === "string"
-          ? result
-          : result?.id || result?.rockId || result?.docId;
+  const title = (rock as any)?.title ?? "";
+  const statement = (rock as any)?.statement ?? (rock as any)?.finalStatement ?? "";
 
-      if (!rockId) throw new Error("saveRock did not return a rock id.");
+  async function saveNow(nextRock?: Rock): Promise<void> {
+    if (!uid || !rock || !rockId) return;
 
-      router.push(`/rocks/${rockId}`);
-    } catch (e) {
-      console.error(e);
-      setErr("Could not continue. Try again.");
+    setSaving(true);
+    try {
+      const toSave: any = nextRock ?? rock;
+      toSave.updatedAt = Date.now();
+
+      setRock(toSave as Rock);
+
+      // ✅ BUILD FIX: saveRock expects 2 args in this project
+      await saveRock(rockId, toSave as Rock);
+
+      setLastSavedAt(Date.now());
+
+      // Stable URL after first save
+      router.replace(`/rocks/${rockId}`);
     } finally {
       setSaving(false);
     }
   }
 
-  return (
-    <div className="pr-page pr-shell">
-      {/* Content */}
-      <div className="flex-1">
-        <div className="max-w-3xl mx-auto px-6">
-          {/* HERO HEADER */}
-          <div className="pt-8 pb-4">
-            <div className="text-[34px] leading-tight">
-              <span className="pr-header-accent font-extrabold">Pocket</span>
-              <span className="font-black tracking-tight">Rocks</span>
-            </div>
-            <div
-              className="mt-1 text-xs tracking-widest uppercase"
-              style={{ color: "var(--pr-muted)" }}
-            >
-              Create Rock · Draft
-            </div>
-          </div>
+  async function enterImprove() {
+    setMode("improve");
 
-          {/* Main */}
-          <div className="pt-6 pb-10">
-            {err && <div className="pr-alert mb-3">{err}</div>}
+    const txt = statement?.trim();
+    if (!txt) {
+      setSuggestion(null);
+      setSuggestionError("Write a draft first.");
+      return;
+    }
 
-            <div className="pr-panel p-6">
-              <div className="pr-label mb-2">Draft Rock (one sentence)</div>
+    setLoadingSuggestion(true);
+    setSuggestionError(null);
 
-              <textarea
-                className="pr-textarea"
-                style={{ minHeight: 160 }}
-                placeholder="Enter text here."
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-              />
+    try {
+      const s = await fetchSuggestion(txt);
+      setSuggestion({ id: "rec", text: s, recommended: true });
+    } catch {
+      setSuggestion(null);
+      setSuggestionError("Could not generate a suggestion.");
+    } finally {
+      setLoadingSuggestion(false);
+    }
+  }
 
-              <div className="mt-5 pr-label mb-2">Add details (optional)</div>
+  async function requestAnother() {
+    const txt = statement?.trim();
+    if (!txt) return;
 
-              <textarea
-                className="pr-textarea"
-                style={{ minHeight: 110 }}
-                placeholder="Add a few notes that help you clarify the Rock."
-                value={details}
-                onChange={(e) => setDetails(e.target.value)}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
+    setLoadingSuggestion(true);
+    setSuggestionError(null);
+    try {
+      const s = await fetchSuggestion(txt);
+      setSuggestion({ id: String(Date.now()), text: s });
+    } catch {
+      setSuggestionError("Could not generate a suggestion.");
+    } finally {
+      setLoadingSuggestion(false);
+    }
+  }
 
-      {/* Sticky footer (short + never overlaps content) */}
-      <div className="pr-footer-dock">
-        <div className="pr-footer-inner">
-          <div className="text-xs" style={{ color: "var(--pr-muted)" }}>
-            Draft · Step 1 of 5
-          </div>
+  async function applySuggestion(nextText: string) {
+    if (!rock) return;
 
-          <button
-            type="button"
-            className="pr-primary-button"
-            disabled={!canContinue}
-            onClick={onContinue}
+    const nextRock: any = { ...rock };
+
+    if (Object.prototype.hasOwnProperty.call(nextRock, "statement")) {
+      nextRock.statement = nextText;
+    } else {
+      nextRock.finalStatement = nextText;
+    }
+
+    nextRock.updatedAt = Date.now();
+    setRock(nextRock as Rock);
+
+    // Persist immediately if we can
+    if (rockId) {
+      await saveRock(rockId, nextRock as Rock);
+      setLastSavedAt(Date.now());
+      router.replace(`/rocks/${rockId}`);
+    }
+  }
+
+  if (loading) {
+    return <div className="min-h-[60vh] flex items-center justify-center text-white/70">Loading…</div>;
+  }
+
+  if (!uid) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center px-6">
+        <div className="max-w-md w-full rounded-2xl border border-white/10 bg-white/5 p-5">
+          <div className="text-white font-semibold mb-2">Please sign in</div>
+          <div className="text-white/70 text-sm mb-4">You need an account to create Rocks.</div>
+          <Button
+            className="inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold text-white bg-[#FF7900]"
+            onClick={() => router.push("/login")}
           >
-            {saving ? "Saving..." : "Continue"}
-          </button>
+            Go to Login
+          </Button>
         </div>
       </div>
+    );
+  }
+
+  return (
+    <div className="w-full">
+      <CollapsedHeader
+        titleLeft="Create Rock"
+        titleRight={mode === "draft" ? "Draft" : "Improve"}
+        rightSlot={lastSavedAt ? <span className="text-white/55">Saved</span> : null}
+      />
+
+      {mode === "draft" ? (
+        <DraftMode
+          draft={statement}
+          title={title}
+          saving={saving}
+          lastSavedAt={lastSavedAt}
+          onChangeDraft={(next) => {
+            setRock((prev: any) => {
+              if (!prev) return prev;
+              const hasStatement = Object.prototype.hasOwnProperty.call(prev, "statement");
+              return hasStatement ? { ...prev, statement: next } : { ...prev, finalStatement: next };
+            });
+          }}
+          onChangeTitle={(next) => setRock((prev: any) => (prev ? { ...prev, title: next } : prev))}
+          onSaveNow={async () => saveNow()}
+          onContinue={enterImprove}
+        />
+      ) : (
+        <ImproveMode
+          draftText={statement}
+          rockTitle={title}
+          suggestion={suggestion}
+          loadingSuggestion={loadingSuggestion}
+          suggestionError={suggestionError}
+          onRequestAnother={requestAnother}
+          onApplySuggestion={applySuggestion}
+          onBackToDraft={() => setMode("draft")}
+        />
+      )}
     </div>
   );
 }

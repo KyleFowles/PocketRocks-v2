@@ -18,6 +18,7 @@
    ============================================================ */
 
 import React from "react";
+import { Button } from "@/components/Button";
 
 export default function StickyBottomBar(props: {
   progressLabel: string;
@@ -34,31 +35,23 @@ export default function StickyBottomBar(props: {
         <div className="max-w-3xl mx-auto px-4 py-4 flex flex-col items-center gap-2">
           <div className="text-xs text-white/55">{progressLabel}</div>
 
-          <button
+          <Button
             type="button"
             onClick={primaryAction.onClick}
             disabled={isDisabled}
-            className={[
-              "inline-flex items-center justify-center",
-              "rounded-xl px-10 py-3 text-sm font-semibold",
-              "text-white transition-all duration-200 active:scale-[0.98]",
-              isDisabled
-                ? "bg-[#FF7900]/25 text-white/60"
-                : "bg-[#FF7900] hover:bg-[#FF8A1A] shadow-[0_10px_35px_rgba(255,121,0,0.45)] ring-1 ring-[#FFB366]/40",
-            ].join(" ")}
           >
             {primaryAction.label}
-          </button>
+          </Button>
 
           {secondaryAction ? (
-            <button
+            <Button
               type="button"
               onClick={secondaryAction.onClick}
               disabled={secondaryAction.disabled}
               className="text-xs text-white/55 hover:text-white transition disabled:opacity-40"
             >
               {secondaryAction.label}
-            </button>
+            </Button>
           ) : null}
         </div>
       </div>
