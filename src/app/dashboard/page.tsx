@@ -1,13 +1,12 @@
-// FILE: src/app/dashboard/page.tsx
-// SCOPE:
-// - Client-only Dashboard page (prevents Vercel build/SSR crashes)
-// - Loads the signed-in user's Rocks from Firestore
-// - Links to create a new Rock and open an existing Rock
-//
-// WHY THIS FIX:
-// Vercel build was failing with a stack pointing to this file (line ~10).
-// That usually happens when Firebase client code runs during SSR/build.
-// This page is forced client-side and only touches Firestore inside useEffect.
+/* ============================================================
+   FILE: src/app/dashboard/page.tsx
+
+   SCOPE:
+   Dashboard page
+   - Uses semantic button styling via buttonClassName()
+   - "+ New Rock" is a true primary button (theme-driven)
+   - "Go to Login" uses secondary button style
+   ============================================================ */
 
 "use client";
 
@@ -16,6 +15,7 @@ import Link from "next/link";
 
 import { useAuth } from "@/lib/useAuth";
 import { getDbClient } from "@/lib/firebase";
+import { buttonClassName } from "@/components/Button";
 
 import { collection, getDocs, limit, orderBy, query } from "firebase/firestore";
 
@@ -93,9 +93,11 @@ export default function DashboardPage() {
 
         <Link
           href="/rocks/new"
-          className="rounded-xl bg-[var(--orange)] px-4 py-2 text-sm font-semibold text-white shadow-md hover:opacity-95"
+          className={buttonClassName("primary")}
+          aria-label="Create a new Rock"
         >
-          + New Rock
+          <span className="text-base leading-none">+</span>
+          <span>New Rock</span>
         </Link>
       </div>
 
@@ -105,10 +107,8 @@ export default function DashboardPage() {
         {!loading && !uid && (
           <div className="text-sm text-white/70">
             <p>You’re not signed in.</p>
-            <Link
-              href="/login"
-              className="mt-2 inline-block rounded-xl bg-white/10 px-3 py-2 text-white hover:bg-white/15"
-            >
+
+            <Link href="/login" className={buttonClassName("secondary", "mt-2")}>
               Go to Login
             </Link>
           </div>
@@ -120,9 +120,7 @@ export default function DashboardPage() {
               <p className="text-sm text-white/70">
                 Signed in as <span className="text-white/90">{uid}</span>
               </p>
-              {loadingRocks && (
-                <p className="text-xs text-white/60">Loading…</p>
-              )}
+              {loadingRocks && <p className="text-xs text-white/60">Loading…</p>}
             </div>
 
             {err && (
@@ -154,9 +152,7 @@ export default function DashboardPage() {
                           {r.dueDate ? `Due: ${r.dueDate}` : "Due: —"}
                         </div>
                       </div>
-                      <span className="shrink-0 text-xs text-white/50">
-                        Open →
-                      </span>
+                      <span className="shrink-0 text-xs text-white/50">Open →</span>
                     </div>
                   </Link>
                 ))

@@ -2,47 +2,55 @@
    FILE: src/app/globals.css
 
    SCOPE:
-   PocketRocks Global Styles — BLUE PRIMARY ACTION (LOCKED)
-   - Tailwind v4 compatible
-   - Dark, modern UI
-   - Bright, translucent blue "Continue" button
-   - Force overrides Tailwind bg-* utilities
+   Global styling + Tailwind directives.
+   - Defines theme tokens (including button tokens)
+   - Adds portable, semantic button classes:
+       .btn (base)
+       .btn-primary
+       .btn-secondary
+       .btn-ghost
+   - No color is hard-coded in components anymore
    ============================================================ */
 
 @import "tailwindcss";
 
-/* ------------------------------------------------------------
-   CSS VARIABLES
------------------------------------------------------------- */
+/* ------------------------------------------------------------------
+   THEME TOKENS
+   ------------------------------------------------------------------ */
+
 :root {
   color-scheme: dark;
 
-  /* BACKGROUNDS */
-  --bg-main: #0b1220;
-  --bg-panel: #121b33;
-  --bg-panel-soft: #1b2747;
+  /* App surface */
+  --bg-0: #050915;
+  --bg-1: #071126;
+  --panel: rgba(255, 255, 255, 0.06);
+  --panel-border: rgba(255, 255, 255, 0.10);
 
-  --border-subtle: #2a3a63;
+  /* Text */
+  --text-0: rgba(255, 255, 255, 0.92);
+  --text-1: rgba(255, 255, 255, 0.70);
+  --text-2: rgba(255, 255, 255, 0.55);
 
-  /* TEXT */
-  --text-main: #f8fafc;
-  --text-muted: #c7d2fe;
+  /* Buttons (semantic tokens) */
+  --btn-primary-bg: linear-gradient(180deg, rgba(18, 215, 201, 0.92), rgba(20, 170, 213, 0.92));
+  --btn-primary-bg-hover: linear-gradient(180deg, rgba(18, 215, 201, 1), rgba(20, 170, 213, 1));
+  --btn-primary-text: rgba(255, 255, 255, 0.98);
 
-  /* PRIMARY ACTION — GLASS BLUE */
-  --blue-main: rgba(56, 189, 248, 0.85);
-  --blue-hover: rgba(96, 207, 255, 0.95);
-  --blue-active: rgba(14, 165, 233, 0.95);
-  --blue-glow: rgba(56, 189, 248, 0.55);
+  --btn-secondary-bg: rgba(255, 255, 255, 0.08);
+  --btn-secondary-bg-hover: rgba(255, 255, 255, 0.12);
+  --btn-secondary-text: rgba(255, 255, 255, 0.92);
+
+  --btn-ghost-bg-hover: rgba(255, 255, 255, 0.08);
+  --btn-ghost-text: rgba(255, 255, 255, 0.80);
+
+  /* Focus ring */
+  --ring: rgba(18, 215, 201, 0.45);
 }
 
-/* ------------------------------------------------------------
-   BASE RESET
------------------------------------------------------------- */
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
+/* ------------------------------------------------------------------
+   BASE PAGE
+   ------------------------------------------------------------------ */
 
 html,
 body {
@@ -51,161 +59,53 @@ body {
 
 body {
   margin: 0;
-  background: radial-gradient(
-      1100px 600px at 50% -200px,
-      #1e2a4d,
-      var(--bg-main)
-    );
-  color: var(--text-main);
-
-  font-family: system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-
-  font-size: 16px;
-  line-height: 1.55;
-
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  background: radial-gradient(1200px 600px at 20% 0%, rgba(24, 60, 140, 0.35), transparent 60%),
+    radial-gradient(900px 500px at 75% 10%, rgba(18, 215, 201, 0.18), transparent 65%),
+    linear-gradient(180deg, var(--bg-1), var(--bg-0));
+  color: var(--text-0);
 }
 
-/* ------------------------------------------------------------
-   PANELS / CARDS
------------------------------------------------------------- */
-.panel {
-  background: linear-gradient(
-    180deg,
-    var(--bg-panel-soft),
-    var(--bg-panel)
-  );
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px;
-  box-shadow:
-    0 12px 34px rgba(0, 0, 0, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
-}
+/* ------------------------------------------------------------------
+   SEMANTIC BUTTON CLASSES
+   ------------------------------------------------------------------ */
 
-/* ------------------------------------------------------------
-   PRIMARY BUTTON — CONTINUE (FORCED OVERRIDE)
------------------------------------------------------------- */
-.btn-primary {
-  appearance: none !important;
-  border: 1px solid rgba(255, 255, 255, 0.25) !important;
-  border-radius: 14px !important;
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition;
+    @apply focus:outline-none;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  }
 
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.25),
-    var(--blue-main)
-  ) !important;
+  .btn:focus-visible {
+    outline: 2px solid transparent;
+    box-shadow: 0 0 0 3px var(--ring), 0 10px 30px rgba(0, 0, 0, 0.28);
+  }
 
-  backdrop-filter: blur(6px) !important;
-  -webkit-backdrop-filter: blur(6px) !important;
+  .btn-primary {
+    background: var(--btn-primary-bg);
+    color: var(--btn-primary-text);
+  }
 
-  color: #ffffff !important;
+  .btn-primary:hover {
+    background: var(--btn-primary-bg-hover);
+  }
 
-  font-size: 16px !important;
-  font-weight: 700 !important;
-  letter-spacing: 0.015em !important;
+  .btn-secondary {
+    background: var(--btn-secondary-bg);
+    color: var(--btn-secondary-text);
+    border: 1px solid var(--panel-border);
+  }
 
-  padding: 14px 26px !important;
+  .btn-secondary:hover {
+    background: var(--btn-secondary-bg-hover);
+  }
 
-  cursor: pointer !important;
+  .btn-ghost {
+    background: transparent;
+    color: var(--btn-ghost-text);
+  }
 
-  box-shadow:
-    0 10px 30px var(--blue-glow),
-    inset 0 1px 0 rgba(255, 255, 255, 0.55) !important;
-
-  transition:
-    transform 0.08s ease,
-    box-shadow 0.2s ease,
-    filter 0.2s ease !important;
-
-  text-rendering: optimizeLegibility !important;
-}
-
-.btn-primary:hover {
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.35),
-    var(--blue-hover)
-  ) !important;
-  transform: translateY(-1px) !important;
-}
-
-.btn-primary:active {
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.15),
-    var(--blue-active)
-  ) !important;
-  transform: translateY(1px) !important;
-  box-shadow:
-    0 5px 16px var(--blue-glow),
-    inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
-}
-
-.btn-primary:disabled {
-  opacity: 0.5 !important;
-  cursor: not-allowed !important;
-  box-shadow: none !important;
-}
-
-/* ------------------------------------------------------------
-   SECONDARY BUTTON
------------------------------------------------------------- */
-.btn-secondary {
-  appearance: none;
-  border-radius: 12px;
-  border: 1px solid var(--border-subtle);
-
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text-main);
-
-  padding: 12px 20px;
-  font-size: 15px;
-  font-weight: 600;
-
-  cursor: pointer;
-}
-
-.btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-/* ------------------------------------------------------------
-   FORM ELEMENTS
------------------------------------------------------------- */
-input,
-textarea,
-select {
-  background: #0b1220;
-  border: 1px solid var(--border-subtle);
-  border-radius: 10px;
-
-  color: var(--text-main);
-  font-size: 15px;
-
-  padding: 11px 13px;
-}
-
-input::placeholder,
-textarea::placeholder {
-  color: var(--text-muted);
-}
-
-input:focus,
-textarea:focus,
-select:focus {
-  outline: none;
-  border-color: var(--blue-main);
-  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.35);
-}
-
-/* ------------------------------------------------------------
-   UTILITIES
------------------------------------------------------------- */
-.center {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  .btn-ghost:hover {
+    background: var(--btn-ghost-bg-hover);
+  }
 }
