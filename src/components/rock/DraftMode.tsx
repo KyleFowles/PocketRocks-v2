@@ -3,15 +3,14 @@
 
    SCOPE:
    Draft Mode UI for Rock editing.
-   - Accepts and renders `title` + `onChangeTitle` (fixes TS build error)
-   - Keeps draft statement editing
-   - Shows save status + supports Save Now + Continue actions
-   - Designed to work with StickyBottomBar + shared Button
+   - Guaranteed above-the-fold layout on laptop screens
+   - No hard-coded header height assumptions
+   - Footer-safe layout with explicit space reservation
 
-   NOTES:
-   - This change fixes:
-     src/app/rocks/[rockId]/page.tsx passing `title={...}` which previously
-     did not exist on DraftModeProps.
+   DESIGN PRINCIPLES:
+   - Mobile-first
+   - SaaS-grade vertical rhythm
+   - Stable under future header/footer changes
    ============================================================ */
 
 "use client";
@@ -21,49 +20,41 @@ import StickyBottomBar from "@/components/rock/StickyBottomBar";
 import { Button } from "@/components/Button";
 
 export type DraftModeProps = {
-  // Core content
   title: string;
   draft: string;
 
-  // Save state
   saving: boolean;
   lastSavedAt: number | null;
 
-  // Handlers
   onChangeTitle: (next: string) => void;
   onChangeDraft: (next: string) => void;
 
-  // Actions
   onSaveNow: () => Promise<void>;
   onContinue: () => Promise<void>;
 
-  // Optional UI helpers
   hint?: string;
 };
 
 function formatLastSaved(ts: number | null) {
   if (!ts) return "Not saved yet";
   try {
-    const d = new Date(ts);
-    return `Saved ${d.toLocaleString()}`;
+    return `Saved ${new Date(ts).toLocaleString()}`;
   } catch {
     return "Saved";
   }
 }
 
-export default function DraftMode(props: DraftModeProps) {
-  const {
-    title,
-    draft,
-    saving,
-    lastSavedAt,
-    onChangeTitle,
-    onChangeDraft,
-    onSaveNow,
-    onContinue,
-    hint,
-  } = props;
-
+export default function DraftMode({
+  title,
+  draft,
+  saving,
+  lastSavedAt,
+  onChangeTitle,
+  onChangeDraft,
+  onSaveNow,
+  onContinue,
+  hint,
+}: DraftModeProps) {
   const statusText = useMemo(() => {
     if (saving) return "Saving…";
     return formatLastSaved(lastSavedAt);
@@ -72,24 +63,32 @@ export default function DraftMode(props: DraftModeProps) {
   const canContinue = useMemo(() => {
     const t = (title ?? "").trim();
     const d = (draft ?? "").trim();
-    // Allow continue if either has meaningful content
     return t.length > 0 || d.length > 0;
   }, [title, draft]);
 
   return (
-    <div className="min-h-[calc(100vh-72px)] pb-24">
-      <div className="mx-auto w-full max-w-3xl px-5 pt-8">
-        <div className="mb-6">
-          <div className="text-sm tracking-[0.25em] text-white/60">DRAFT</div>
-          <h1 className="mt-2 text-3xl font-semibold text-white">Start your Rock</h1>
-          <p className="mt-2 text-white/70">
+    <div className="relative pb-[88px]">
+      <div className="mx-auto w-full max-w-3xl px-5 pt-5">
+        {/* Header */}
+        <div className="mb-4">
+          <div className="text-xs tracking-[0.22em] text-white/60">
+            DRAFT
+          </div>
+          <h1 className="mt-1 text-2xl font-semibold text-white">
+            Start your Rock
+          </h1>
+          <p className="mt-1 text-sm text-white/70">
             Capture the goal in plain language. You can refine it later.
           </p>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 shadow-[0_12px_40px_rgba(0,0,0,0.35)]">
+        {/* Card */}
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 shadow-[0_12px_40px_rgba(0,0,0,0.35)]">
+          {/* Title */}
           <div className="flex flex-col gap-2">
-            <label className="text-sm font-medium text-white/80">Title</label>
+            <label className="text-sm font-medium text-white/80">
+              Title
+            </label>
             <input
               value={title ?? ""}
               onChange={(e) => onChangeTitle(e.target.value)}
@@ -98,26 +97,35 @@ export default function DraftMode(props: DraftModeProps) {
             />
           </div>
 
-          <div className="mt-5 flex flex-col gap-2">
-            <label className="text-sm font-medium text-white/80">Draft Rock statement</label>
+          {/* Draft */}
+          <div className="mt-4 flex flex-col gap-2">
+            <label className="text-sm font-medium text-white/80">
+              Draft Rock statement
+            </label>
             <textarea
               value={draft ?? ""}
               onChange={(e) => onChangeDraft(e.target.value)}
               placeholder="Write a clear, outcome-based statement…"
-              rows={6}
-              className="w-full resize-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none placeholder:text-white/35 focus:border-white/20 focus:ring-2 focus:ring-white/10"
+              rows={4}
+              className="w-full resize-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none placeholder:text-white/35 focus:border-white/20 focus:ring-2 focus:ring-white/10 sm:rows-5"
             />
-            <div className="mt-1 flex items-center justify-between gap-3 text-sm">
-              <div className="text-white/60">{hint ?? "Tip: Keep it measurable and time-bound."}</div>
-              <div className="text-white/55">{statusText}</div>
+
+            <div className="mt-1 flex items-center justify-between gap-3 text-xs">
+              <div className="text-white/60">
+                {hint ?? "Tip: Keep it measurable and time-bound."}
+              </div>
+              <div className="text-white/55">
+                {statusText}
+              </div>
             </div>
           </div>
 
-          <div className="mt-6 flex flex-wrap items-center gap-3">
+          {/* Inline actions (desktop assist) */}
+          <div className="mt-4 flex flex-wrap items-center gap-3">
             <Button
               type="button"
               variant="secondary"
-              onClick={() => onSaveNow()}
+              onClick={onSaveNow}
               disabled={saving}
             >
               Save now
@@ -126,7 +134,7 @@ export default function DraftMode(props: DraftModeProps) {
             <Button
               type="button"
               variant="primary"
-              onClick={() => onContinue()}
+              onClick={onContinue}
               disabled={saving || !canContinue}
             >
               Continue
@@ -135,6 +143,7 @@ export default function DraftMode(props: DraftModeProps) {
         </div>
       </div>
 
+      {/* Sticky footer */}
       <StickyBottomBar
         progressLabel="Draft · Step 1 of 5"
         primaryAction={{
