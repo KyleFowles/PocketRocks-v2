@@ -1,6 +1,13 @@
-"use client";
+/* ============================================================
+   FILE: src/app/providers.tsx
 
-// FILE: src/app/providers.tsx
+   SCOPE:
+   App Providers (Auth + Theme bootstrap)
+   - Applies DEFAULT_THEME once on app load
+   - Keeps existing AuthContext behavior stable
+   ============================================================ */
+
+"use client";
 
 import React, { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged, signOut as fbSignOut, type User } from "firebase/auth";
@@ -8,55 +15,27 @@ import { onAuthStateChanged, signOut as fbSignOut, type User } from "firebase/au
 import { getAuthClient } from "@/lib/firebase";
 import { AuthContext, type AuthState } from "@/lib/useAuth";
 
+import { applyTheme, DEFAULT_THEME } from "@/lib/theme";
+
 export default function Providers({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // ✅ Apply theme tokens once on startup
   useEffect(() => {
-    let unsub: (() => void) | null = null;
-    let active = true;
+    applyTheme(DEFAULT_THEME);
+  }, []);
 
-    const safetyTimeout = window.setTimeout(() => {
-      if (!active) return;
+  // ✅ Auth state
+  useEffect(() => {
+    const auth = getAuthClient();
+
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
       setLoading(false);
-    }, 6000);
+    });
 
-    (async () => {
-      try {
-        const auth = getAuthClient();
-
-        unsub = onAuthStateChanged(
-          auth,
-          (u) => {
-            if (!active) return;
-            window.clearTimeout(safetyTimeout);
-            setUser(u);
-            setLoading(false);
-          },
-          () => {
-            if (!active) return;
-            window.clearTimeout(safetyTimeout);
-            setUser(null);
-            setLoading(false);
-          }
-        );
-      } catch (err) {
-        // Defer state updates so the lint rule doesn't fire
-        window.setTimeout(() => {
-          if (!active) return;
-          window.clearTimeout(safetyTimeout);
-          console.error("[Auth] getAuthClient failed:", err);
-          setUser(null);
-          setLoading(false);
-        }, 0);
-      }
-    })();
-
-    return () => {
-      active = false;
-      window.clearTimeout(safetyTimeout);
-      if (unsub) unsub();
-    };
+    return () => unsub();
   }, []);
 
   const value = useMemo<AuthState>(() => {

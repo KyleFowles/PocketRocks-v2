@@ -2,10 +2,9 @@
    FILE: src/app/globals.css
 
    SCOPE:
-   Global styling + Tailwind directives.
-   - Restores “sizzle” for blue buttons via CSS variables
-   - Improves text crispness (font smoothing)
-   - Adds consistent focus ring tokens
+   Global styling + role-based CSS variables.
+   - NO color-based naming
+   - Button styling fully driven by theme tokens
    ============================================================ */
 
 @import "tailwindcss";
@@ -13,23 +12,35 @@
 :root {
   color-scheme: dark;
 
-  /* App base */
+  /* ==========================================================
+     App Base
+     ========================================================== */
   --bg-0: #0b1220;
   --bg-1: #0f1a2f;
   --text-0: rgba(255, 255, 255, 0.92);
   --text-1: rgba(255, 255, 255, 0.72);
 
-  /* 🔥 Button “sizzle” tokens (blue) */
-  --btn-blue-1: #6ea8ff; /* top highlight */
-  --btn-blue-2: #2f6bff; /* main */
-  --btn-blue-3: #1a3fd6; /* bottom */
-  --btn-blue-edge: rgba(255, 255, 255, 0.18);
-  --btn-blue-glow: rgba(98, 160, 255, 0.42);
-  --btn-blue-glow-strong: rgba(98, 160, 255, 0.65);
+  /* ==========================================================
+     Primary Button — Role-Based Tokens
+     (Values are overridden by theme.ts at runtime)
+     ========================================================== */
 
-  /* Focus ring */
-  --ring: rgba(110, 168, 255, 0.55);
-  --ring-strong: rgba(110, 168, 255, 0.75);
+  /* Gradient */
+  --button-top: #84b6ff;
+  --button-main: #3b7bff;
+  --button-bottom: #1a49e6;
+
+  /* Surface */
+  --button-edge: rgba(255, 255, 255, 0.16);
+  --button-inner-top: rgba(255, 255, 255, 0.20);
+  --button-inner-bottom: rgba(0, 0, 0, 0.18);
+  --button-sheen: rgba(255, 255, 255, 0.22);
+
+  /* Glow + Focus */
+  --button-glow: rgba(98, 160, 255, 0.45);
+  --button-glow-strong: rgba(98, 160, 255, 0.72);
+  --focus-ring: rgba(110, 168, 255, 0.55);
+  --focus-ring-strong: rgba(110, 168, 255, 0.78);
 }
 
 html,
@@ -39,7 +50,8 @@ body {
 
 body {
   margin: 0;
-  background: radial-gradient(1200px 700px at 20% 10%, rgba(110, 168, 255, 0.10), transparent 55%),
+  background:
+    radial-gradient(1200px 700px at 20% 10%, rgba(110, 168, 255, 0.10), transparent 55%),
     radial-gradient(1000px 650px at 80% 20%, rgba(255, 121, 0, 0.06), transparent 55%),
     linear-gradient(180deg, var(--bg-0), var(--bg-1));
   color: var(--text-0);
@@ -48,20 +60,17 @@ body {
   text-rendering: geometricPrecision;
 }
 
-/* Make buttons feel crisp everywhere */
 button,
 a {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Optional: slightly nicer selection */
 ::selection {
   background: rgba(110, 168, 255, 0.28);
 }
 
-/* Utility: consistent focus outline (works even outside Button) */
 :focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--ring);
+  box-shadow: 0 0 0 3px var(--focus-ring);
   border-radius: 12px;
 }
