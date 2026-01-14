@@ -1,85 +1,62 @@
-"use client";
-
 /* ============================================================
    FILE: src/components/AppHeader.tsx
 
-   FINAL POLISH:
-   - Logout becomes "dangerGhost" (destructive, low weight)
-   - Dashboard remains primary
-   - No visual competition with workflow CTAs
+   SCOPE:
+   App header bar.
+   - Uses Button variant="dangerGhost" for Logout
+   - No logic changes; aligns with ButtonVariant typing
    ============================================================ */
 
+"use client";
+
 import React, { useMemo, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
-import { useAuth } from "@/lib/useAuth";
-import { logout } from "@/lib/auth";
 import { Button } from "@/components/Button";
+import { useAuth } from "@/lib/useAuth";
 
-type HeaderRight = {
-  active?: "dashboard" | "none";
-  showDashboard?: boolean;
-  showLogout?: boolean;
-};
-
-type Props = {
-  title?: string; // small label to the right of PocketRocks
-  right?: HeaderRight;
-};
-
-export default function AppHeader({ title = "Smart Rocks", right }: Props) {
+export default function AppHeader() {
   const router = useRouter();
-  const { user, loading } = useAuth();
+  const pathname = usePathname();
+
+  const { user, loading, signOut } = useAuth();
+
   const [loggingOut, setLoggingOut] = useState(false);
 
-  const showDashboard = right?.showDashboard ?? true;
-  const showLogout = right?.showLogout ?? true;
-  const active = right?.active ?? "none";
+  const showLogout = useMemo(() => {
+    // Don’t show on login page
+    if (!pathname) return false;
+    if (pathname.startsWith("/login")) return false;
+    return true;
+  }, [pathname]);
 
   const statusLabel = useMemo(() => {
-    if (loggingOut) return "Logging out…";
-    if (loading) return "Checking…";
-    return null;
-  }, [loading, loggingOut]);
+    if (loading) return "Loading…";
+    if (!user) return "Signed out";
+    return "Signed in";
+  }, [user, loading]);
 
   async function handleLogout() {
     try {
       setLoggingOut(true);
-      await logout();
-      router.replace("/login");
+      await signOut();
+      router.push("/login");
     } finally {
       setLoggingOut(false);
     }
   }
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/10 bg-slate-950/80 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-        {/* LEFT: Brand */}
-        <div className="flex items-center gap-5">
-          <Link href="/dashboard" className="flex items-baseline gap-2">
-            <span className="leading-none font-extrabold tracking-tight text-4xl sm:text-5xl">
-              <span className="text-orange-500">Pocket</span>
-              <span className="text-white">Rocks</span>
-            </span>
-          </Link>
-
-          <span className="hidden sm:inline text-sm text-slate-400">{title}</span>
+    <header className="w-full border-b border-white/10 bg-black/20 backdrop-blur">
+      <div className="mx-auto max-w-5xl px-4 py-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="text-white font-extrabold tracking-tight">
+            PocketRocks
+          </div>
+          <div className="text-xs text-white/60">{statusLabel}</div>
         </div>
 
-        {/* RIGHT: Actions */}
         <div className="flex items-center gap-2">
-          {showDashboard && (
-            <Button
-              onClick={() => router.push("/dashboard")}
-              disabled={!user || loading || loggingOut}
-              variant={active === "dashboard" ? "primary" : "primary"}
-            >
-              Dashboard
-            </Button>
-          )}
-
           {showLogout && (
             <Button
               variant="dangerGhost"
@@ -87,7 +64,7 @@ export default function AppHeader({ title = "Smart Rocks", right }: Props) {
               disabled={!user || loading || loggingOut}
               title={statusLabel ?? "Logout"}
             >
-              {statusLabel ?? "Logout"}
+              {loggingOut ? "Logging out…" : "Logout"}
             </Button>
           )}
         </div>

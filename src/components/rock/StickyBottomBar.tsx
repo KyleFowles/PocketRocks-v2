@@ -1,23 +1,11 @@
 /* ============================================================
-   FILE: src/components/rock/StickyBottomBar.tsx
+   FILE: components/rock/StickyBottomBar.tsx
 
    SCOPE:
-   Sticky bottom action bar for PocketRocks flows (Responsive).
-
-   CLARITY UPDATE (REMOVES "SMOKE"):
-   - Remove backdrop blur (major source of haze)
-   - Use a crisp, near-opaque surface for the footer
-   - Center primary CTA (flow continuation)
-   - Strong separation via top border + subtle shadow
-
-   BUTTON SYSTEM:
-   - Uses shared <Button> component for primary + secondary actions
-   - Ensures full-width primary CTA on mobile for a world-class SaaS feel
-   - Secondary action uses a true "ghost" style (no orange, no hard-coded classes)
-
-   UX CONTRACT:
-   - One primary action
-   - Progress is passive
+   Sticky footer actions for Rock flow.
+   - Fix build error by removing unsupported Button prop: size
+   - Backward compatible: accepts `hint` (new) and `progressLabel` (legacy)
+   - Uses semantic Button variants (theme-driven)
    ============================================================ */
 
 "use client";
@@ -25,46 +13,65 @@
 import React from "react";
 import { Button } from "@/components/Button";
 
-export default function StickyBottomBar(props: {
-  progressLabel: string;
-  secondaryAction?: { label: string; onClick: () => void; disabled?: boolean };
-  primaryAction: { label: string; onClick: () => void; disabled?: boolean };
+type BarAction = {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  loading?: boolean;
+};
+
+export default function StickyBottomBar({
+  primaryAction,
+  secondaryAction,
+  hint,
+  progressLabel,
+}: {
+  primaryAction: BarAction;
+  secondaryAction?: BarAction;
+  hint?: string;
+  /** Legacy prop kept to prevent build breaks in older files. Prefer `hint`. */
+  progressLabel?: string;
 }) {
-  const { progressLabel, secondaryAction, primaryAction } = props;
+  const label = hint || progressLabel || "";
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-30">
-      {/* Crisp footer surface (NO blur) */}
-      <div className="border-t border-white/10 bg-[#07101f] shadow-[0_-10px_30px_rgba(0,0,0,0.55)]">
-        <div className="mx-auto flex max-w-3xl flex-col items-center gap-2 px-4 py-4">
-          <div className="text-xs text-white/55">{progressLabel}</div>
+    <div className="pointer-events-none fixed bottom-0 left-0 right-0 z-50">
+      <div className="pointer-events-auto mx-auto max-w-4xl px-4 pb-4">
+        <div className="rounded-2xl border border-white/10 bg-black/30 backdrop-blur-md shadow-xl">
+          <div className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              {label ? <div className="text-xs text-white/60">{label}</div> : null}
+            </div>
 
-          {/* Primary CTA: full-width on mobile, snug on desktop */}
-          <Button
-            type="button"
-            onClick={primaryAction.onClick}
-            disabled={primaryAction.disabled}
-            className="w-full sm:w-auto"
-          >
-            {primaryAction.label}
-          </Button>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
+              {secondaryAction ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={secondaryAction.onClick}
+                  disabled={Boolean(secondaryAction.disabled || secondaryAction.loading)}
+                  className="w-full sm:w-auto px-5 py-3"
+                >
+                  {secondaryAction.loading ? "Working…" : secondaryAction.label}
+                </Button>
+              ) : null}
 
-          {secondaryAction ? (
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={secondaryAction.onClick}
-              disabled={secondaryAction.disabled}
-              className="text-xs font-semibold text-white/55 hover:text-white disabled:opacity-40"
-            >
-              {secondaryAction.label}
-            </Button>
-          ) : null}
+              <Button
+                type="button"
+                variant="primary"
+                onClick={primaryAction.onClick}
+                disabled={Boolean(primaryAction.disabled || primaryAction.loading)}
+                className="w-full sm:w-auto px-6 py-3"
+              >
+                {primaryAction.loading ? "Working…" : primaryAction.label}
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* iOS safe-area padding */}
-      <div className="h-[env(safe-area-inset-bottom)] bg-[#07101f]" />
+      {/* spacer so content isn't hidden behind bar */}
+      <div className="h-20 sm:h-16" />
     </div>
   );
 }

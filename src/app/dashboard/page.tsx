@@ -93,7 +93,7 @@ export default function DashboardPage() {
 
         <Link
           href="/rocks/new"
-          className={buttonClassName("primary")}
+          className={buttonClassName({ variant: "primary" })}
           aria-label="Create a new Rock"
         >
           <span className="text-base leading-none">+</span>
@@ -108,7 +108,7 @@ export default function DashboardPage() {
           <div className="text-sm text-white/70">
             <p>You’re not signed in.</p>
 
-            <Link href="/login" className={buttonClassName("secondary", "mt-2")}>
+            <Link href="/login" className={buttonClassName({ variant: "secondary", className: "mt-2" })}>
               Go to Login
             </Link>
           </div>
