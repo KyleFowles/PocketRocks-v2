@@ -2,162 +2,284 @@
    FILE: src/components/rock/DraftMode.tsx
 
    SCOPE:
-   Draft Mode UI for Rock editing.
-   - Guaranteed above-the-fold layout on laptop screens
-   - No hard-coded header height assumptions
-   - Footer-safe layout with explicit space reservation
-
-   DESIGN PRINCIPLES:
-   - Mobile-first
-   - SaaS-grade vertical rhythm
-   - Stable under future header/footer changes
+   Draft screen UI (Step 1 of 5)
+   - Title input + Draft textarea
+   - Bottom sticky bar with Save now + Continue
+   - CRITICAL FIX: Buttons are type="button" (no form submit)
    ============================================================ */
 
 "use client";
 
 import React, { useMemo } from "react";
-import StickyBottomBar from "@/components/rock/StickyBottomBar";
 import { Button } from "@/components/Button";
 
-export type DraftModeProps = {
+type Props = {
   title: string;
   draft: string;
+  saving?: boolean;
+  lastSavedAt?: number | null;
 
-  saving: boolean;
-  lastSavedAt: number | null;
+  onChangeTitle: (v: string) => void;
+  onChangeDraft: (v: string) => void;
 
-  onChangeTitle: (next: string) => void;
-  onChangeDraft: (next: string) => void;
-
-  onSaveNow: () => Promise<void>;
-  onContinue: () => Promise<void>;
-
-  hint?: string;
+  onSaveNow: () => Promise<void> | void;
+  onContinue: () => Promise<void> | void;
 };
 
-function formatLastSaved(ts: number | null) {
-  if (!ts) return "Not saved yet";
-  try {
-    return `Saved ${new Date(ts).toLocaleString()}`;
-  } catch {
-    return "Saved";
-  }
+function fmtSaved(lastSavedAt?: number | null) {
+  if (!lastSavedAt) return "Not saved yet";
+  return "Saved";
 }
 
-export default function DraftMode({
-  title,
-  draft,
-  saving,
-  lastSavedAt,
-  onChangeTitle,
-  onChangeDraft,
-  onSaveNow,
-  onContinue,
-  hint,
-}: DraftModeProps) {
-  const statusText = useMemo(() => {
-    if (saving) return "Saving…";
-    return formatLastSaved(lastSavedAt);
-  }, [saving, lastSavedAt]);
-
+export default function DraftMode(props: Props) {
   const canContinue = useMemo(() => {
-    const t = (title ?? "").trim();
-    const d = (draft ?? "").trim();
+    const t = (props.title ?? "").trim();
+    const d = (props.draft ?? "").trim();
     return t.length > 0 || d.length > 0;
-  }, [title, draft]);
+  }, [props.title, props.draft]);
 
+  // IMPORTANT:
+  // Wrap everything in a plain <div>, NOT a <form>.
+  // If you ever put this into a <form>, the Continue button must stay type="button".
   return (
-    <div className="relative pb-[88px]">
-      <div className="mx-auto w-full max-w-3xl px-5 pt-5">
-        {/* Header */}
-        <div className="mb-4">
-          <div className="text-xs tracking-[0.22em] text-white/60">
-            DRAFT
-          </div>
-          <h1 className="mt-1 text-2xl font-semibold text-white">
-            Start your Rock
-          </h1>
-          <p className="mt-1 text-sm text-white/70">
-            Capture the goal in plain language. You can refine it later.
-          </p>
-        </div>
+    <div style={shell}>
+      <div style={panel}>
+        <div style={eyebrow}>DRAFT</div>
+        <h1 style={h1}>Start your Rock</h1>
+        <p style={sub}>Capture the goal in plain language. You can refine it later.</p>
 
-        {/* Card */}
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 shadow-[0_12px_40px_rgba(0,0,0,0.35)]">
-          {/* Title */}
-          <div className="flex flex-col gap-2">
-            <label className="text-sm font-medium text-white/80">
-              Title
-            </label>
+        <div style={card}>
+          <label style={label}>
+            <div style={labelText}>Title</div>
             <input
-              value={title ?? ""}
-              onChange={(e) => onChangeTitle(e.target.value)}
-              placeholder="e.g., Improve customer response time"
-              className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none placeholder:text-white/35 focus:border-white/20 focus:ring-2 focus:ring-white/10"
+              value={props.title ?? ""}
+              onChange={(e) => props.onChangeTitle(e.target.value)}
+              placeholder="New Rock"
+              style={input}
+              autoComplete="off"
             />
-          </div>
+          </label>
 
-          {/* Draft */}
-          <div className="mt-4 flex flex-col gap-2">
-            <label className="text-sm font-medium text-white/80">
-              Draft Rock statement
-            </label>
+          <label style={{ ...label, marginTop: 14 }}>
+            <div style={labelText}>Draft Rock statement</div>
             <textarea
-              value={draft ?? ""}
-              onChange={(e) => onChangeDraft(e.target.value)}
-              placeholder="Write a clear, outcome-based statement…"
-              rows={4}
-              className="w-full resize-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none placeholder:text-white/35 focus:border-white/20 focus:ring-2 focus:ring-white/10 sm:rows-5"
+              value={props.draft ?? ""}
+              onChange={(e) => props.onChangeDraft(e.target.value)}
+              placeholder="Write a clear, outcome-based statement..."
+              style={textarea}
             />
+          </label>
 
-            <div className="mt-1 flex items-center justify-between gap-3 text-xs">
-              <div className="text-white/60">
-                {hint ?? "Tip: Keep it measurable and time-bound."}
-              </div>
-              <div className="text-white/55">
-                {statusText}
-              </div>
-            </div>
+          <div style={metaRow}>
+            <div style={tip}>Tip: Keep it measurable and time-bound.</div>
+            <div style={saved}>{fmtSaved(props.lastSavedAt)}</div>
           </div>
+        </div>
+      </div>
 
-          {/* Inline actions (desktop assist) */}
-          <div className="mt-4 flex flex-wrap items-center gap-3">
+      {/* Sticky bottom bar */}
+      <div style={stickyWrap}>
+        <div style={stickyBar}>
+          <div style={leftText}>Draft · Step 1 of 5</div>
+
+          <div style={btnRow}>
             <Button
               type="button"
-              variant="secondary"
-              onClick={onSaveNow}
-              disabled={saving}
+              onClick={(e: any) => {
+                // extra safety if Button component passes event
+                try {
+                  e?.preventDefault?.();
+                  e?.stopPropagation?.();
+                } catch {}
+                props.onSaveNow();
+              }}
+              disabled={!!props.saving}
+              style={btnGhost}
             >
               Save now
             </Button>
 
             <Button
               type="button"
-              variant="primary"
-              onClick={onContinue}
-              disabled={saving || !canContinue}
+              onClick={(e: any) => {
+                try {
+                  e?.preventDefault?.();
+                  e?.stopPropagation?.();
+                } catch {}
+                props.onContinue();
+              }}
+              disabled={!!props.saving || !canContinue}
+              style={canContinue ? btnPrimary : btnDisabled}
             >
               Continue
             </Button>
           </div>
         </div>
       </div>
-
-      {/* Sticky footer */}
-      <StickyBottomBar
-        progressLabel="Draft · Step 1 of 5"
-        primaryAction={{
-          label: "Continue",
-          onClick: onContinue,
-          disabled: saving || !canContinue,
-        }}
-        secondaryAction={{
-          label: saving ? "Saving…" : "Save now",
-          onClick: onSaveNow,
-          disabled: saving,
-        }}
-        hint={hint}
-      />
     </div>
   );
 }
+
+/* -----------------------------
+   Styles (inline, stable)
+------------------------------ */
+
+const shell: React.CSSProperties = {
+  paddingBottom: 110, // space for sticky bar
+};
+
+const panel: React.CSSProperties = {
+  maxWidth: 980,
+  margin: "0 auto",
+  padding: "26px 22px 22px",
+};
+
+const eyebrow: React.CSSProperties = {
+  fontSize: 12,
+  letterSpacing: 3,
+  color: "rgba(255,255,255,0.55)",
+  marginBottom: 10,
+};
+
+const h1: React.CSSProperties = {
+  fontSize: 34,
+  fontWeight: 900,
+  margin: 0,
+  color: "rgba(255,255,255,0.95)",
+};
+
+const sub: React.CSSProperties = {
+  marginTop: 8,
+  marginBottom: 18,
+  color: "rgba(255,255,255,0.65)",
+  fontSize: 16,
+};
+
+const card: React.CSSProperties = {
+  borderRadius: 18,
+  border: "1px solid rgba(255,255,255,0.10)",
+  background: "rgba(0,0,0,0.28)",
+  boxShadow: "0 18px 50px rgba(0,0,0,0.35)",
+  padding: 18,
+};
+
+const label: React.CSSProperties = {
+  display: "grid",
+  gap: 8,
+};
+
+const labelText: React.CSSProperties = {
+  color: "rgba(255,255,255,0.75)",
+  fontSize: 14,
+  fontWeight: 700,
+};
+
+const input: React.CSSProperties = {
+  width: "100%",
+  height: 54,
+  padding: "12px 14px",
+  borderRadius: 14,
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "rgba(255,255,255,0.06)",
+  color: "rgba(255,255,255,0.92)",
+  outline: "none",
+  fontSize: 16,
+};
+
+const textarea: React.CSSProperties = {
+  width: "100%",
+  minHeight: 140,
+  padding: "14px 14px",
+  borderRadius: 16,
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "rgba(255,255,255,0.06)",
+  color: "rgba(255,255,255,0.92)",
+  outline: "none",
+  fontSize: 16,
+  resize: "vertical",
+};
+
+const metaRow: React.CSSProperties = {
+  marginTop: 12,
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  flexWrap: "wrap",
+};
+
+const tip: React.CSSProperties = {
+  color: "rgba(255,255,255,0.55)",
+  fontSize: 14,
+};
+
+const saved: React.CSSProperties = {
+  color: "rgba(255,255,255,0.55)",
+  fontSize: 14,
+};
+
+const stickyWrap: React.CSSProperties = {
+  position: "fixed",
+  left: 0,
+  right: 0,
+  bottom: 0,
+  padding: "14px 18px 18px",
+  background: "linear-gradient(to top, rgba(0,0,0,0.75), rgba(0,0,0,0))",
+  zIndex: 50,
+};
+
+const stickyBar: React.CSSProperties = {
+  maxWidth: 980,
+  margin: "0 auto",
+  borderRadius: 18,
+  border: "1px solid rgba(255,255,255,0.10)",
+  background: "rgba(0,0,0,0.40)",
+  boxShadow: "0 18px 60px rgba(0,0,0,0.45)",
+  padding: "14px 14px",
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 14,
+};
+
+const leftText: React.CSSProperties = {
+  color: "rgba(255,255,255,0.60)",
+  fontSize: 14,
+  whiteSpace: "nowrap",
+};
+
+const btnRow: React.CSSProperties = {
+  display: "flex",
+  gap: 12,
+  alignItems: "center",
+  flexWrap: "wrap",
+  justifyContent: "flex-end",
+};
+
+const btnBase: React.CSSProperties = {
+  borderRadius: 14,
+  padding: "12px 16px",
+  fontSize: 16,
+  fontWeight: 800,
+  border: "1px solid rgba(255,255,255,0.12)",
+  cursor: "pointer",
+};
+
+const btnGhost: React.CSSProperties = {
+  ...btnBase,
+  background: "rgba(255,255,255,0.06)",
+  color: "rgba(255,255,255,0.92)",
+};
+
+const btnPrimary: React.CSSProperties = {
+  ...btnBase,
+  background: "linear-gradient(180deg, rgba(80,140,255,0.95), rgba(30,90,230,0.95))",
+  color: "white",
+  border: "1px solid rgba(90,150,255,0.55)",
+};
+
+const btnDisabled: React.CSSProperties = {
+  ...btnBase,
+  background: "rgba(255,255,255,0.10)",
+  color: "rgba(255,255,255,0.45)",
+  cursor: "not-allowed",
+};

@@ -2,9 +2,10 @@
    FILE: src/app/globals.css
 
    SCOPE:
-   Global styling + role-based CSS variables.
-   - NO color-based naming
-   - Button styling fully driven by theme tokens
+   Global styling + role-based CSS variables (CHARTER HARDENED)
+   - Minimal globals (avoid styling components globally)
+   - Theme tokens live here as defaults, overridden by theme.ts at runtime
+   - Focus styling is scoped to form controls, not every element
    ============================================================ */
 
 @import "tailwindcss";
@@ -39,6 +40,8 @@
   /* Glow + Focus */
   --button-glow: rgba(98, 160, 255, 0.45);
   --button-glow-strong: rgba(98, 160, 255, 0.72);
+
+  /* Focus rings (global defaults; Button uses --focus-ring-strong) */
   --focus-ring: rgba(110, 168, 255, 0.55);
   --focus-ring-strong: rgba(110, 168, 255, 0.78);
 }
@@ -60,6 +63,7 @@ body {
   text-rendering: geometricPrecision;
 }
 
+/* Remove iOS tap highlight noise */
 button,
 a {
   -webkit-tap-highlight-color: transparent;
@@ -69,7 +73,13 @@ a {
   background: rgba(110, 168, 255, 0.28);
 }
 
-:focus-visible {
+/* ============================================================
+   Focus handling (CHARTER)
+   - Avoid global :focus-visible that styles everything.
+   - Scope to interactive controls only.
+   ============================================================ */
+
+:where(a, button, input, textarea, select):focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--focus-ring);
   border-radius: 12px;
