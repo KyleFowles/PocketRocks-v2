@@ -2,26 +2,28 @@
    FILE: src/app/rocks/[rockId]/page.tsx
 
    SCOPE:
-   Rock detail page — CHARTER SCRUB (Golden Path)
-   - Pulls rockId from route params safely
-   - Waits for auth uid (and clearly handles "not signed in")
-   - Reads via getRock(uid, rockId)
-   - Normalizes arrays to prevent downstream .map crashes (no mutation)
-   - Passes uid + rockId into RockBuilder
-   - DEV-only logs raw load errors for fast debugging
-   - Prevents setState after unmount (alive guard)
+   Rock detail page — OPTION A (Single Flow) + CHARTER SCRUB
+   - Safe rockId param parsing
+   - Waits for auth uid
+   - If URL has ?new=1:
+       -> skips getRock() and opens builder with empty rock skeleton
+   - Otherwise:
+       -> reads via getRock(uid, rockId)
+   - Normalizes arrays to prevent downstream .map crashes
+   - DEV-only logs load errors
+   - Prevents setState after unmount
    ============================================================ */
 
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 
 import { useAuth } from "@/lib/useAuth";
 import { getRock } from "@/lib/rocks";
 import RockBuilder from "@/components/RockBuilder";
 
-type LoadState = "idle" | "loading" | "ready" | "notfound" | "error";
+type LoadState = "idle" | "loading" | "ready" | "error";
 
 function devError(...args: any[]) {
   if (process.env.NODE_ENV !== "production") {
@@ -46,9 +48,22 @@ function normalizeRock(r: any) {
   };
 }
 
+function makeNewRockSkeleton(rockId: string) {
+  return normalizeRock({
+    id: rockId,
+    title: "",
+    draft: "",
+    metrics: [],
+    milestones: [],
+  });
+}
+
 export default function RockDetailPage() {
   const params = useParams();
   const rockId = useMemo(() => firstParam((params as any)?.rockId), [params]);
+
+  const searchParams = useSearchParams();
+  const isNew = searchParams?.get("new") === "1";
 
   const { uid, loading: authLoading } = useAuth();
 
@@ -83,6 +98,13 @@ export default function RockDetailPage() {
         return;
       }
 
+      // OPTION A: brand-new rock should NOT read Firestore first
+      if (isNew) {
+        setRock(makeNewRockSkeleton(rockId));
+        setLoadState("ready");
+        return;
+      }
+
       try {
         setLoadState("loading");
 
@@ -90,8 +112,9 @@ export default function RockDetailPage() {
         if (!alive) return;
 
         if (!r) {
-          setRock(null);
-          setLoadState("notfound");
+          // Not found: treat as new (but without the ?new=1 hint)
+          setRock(makeNewRockSkeleton(rockId));
+          setLoadState("ready");
           return;
         }
 
@@ -108,7 +131,6 @@ export default function RockDetailPage() {
       }
     }
 
-    // Only fetch when auth is finished and we have both uid + rockId
     if (!authLoading && uid && rockId) {
       run();
     }
@@ -116,7 +138,7 @@ export default function RockDetailPage() {
     return () => {
       alive = false;
     };
-  }, [authLoading, uid, rockId]);
+  }, [authLoading, uid, rockId, isNew]);
 
   // ---- UI states ----
 
@@ -171,7 +193,7 @@ export default function RockDetailPage() {
     );
   }
 
-  if (loadState === "notfound" || !rock) {
+  if (!uid || !rockId || !rock) {
     return (
       <div style={shell}>
         <div style={brand}>PocketRocks</div>
@@ -179,13 +201,13 @@ export default function RockDetailPage() {
 
         <div style={alert}>
           <div style={alertTitle}>Heads up</div>
-          <div style={alertBody}>Rock not found.</div>
+          <div style={alertBody}>Unable to load Rock.</div>
         </div>
       </div>
     );
   }
 
-  return <RockBuilder uid={uid!} rockId={rockId} initialRock={rock} />;
+  return <RockBuilder uid={uid} rockId={rockId} initialRock={rock} />;
 }
 
 /* -----------------------------
@@ -225,7 +247,7 @@ const alertWarn: React.CSSProperties = {
   maxWidth: 980,
   padding: 18,
   borderRadius: 18,
-  border: "1px solid rgba(255,200,80,0.35)",
+  borderA: "1px solid rgba(255,200,80,0.35)",
   background: "rgba(255,200,80,0.10)",
 };
 

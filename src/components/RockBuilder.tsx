@@ -1,18 +1,23 @@
 /* ============================================================
    FILE: src/components/RockBuilder.tsx
 
-   PATCH:
-   Persist step when clicking step pills
-   - StepPill clicks now call goToStep(n)
-   - goToStep() updates local step + schedules save { step: n }
-   - Keeps UI/styling unchanged
+   SCOPE:
+   Rock Builder (Steps 1–5) — FOOTER-ONLY NAVIGATION
+   - Step components are content-only (no Save/Continue buttons inside steps)
+   - Footer owns navigation: Back + ONE primary action
+   - Safe create-on-first-action for OPTION A:
+       * If doc does not exist yet, first primary action creates via createRockWithId()
+       * After created, autosave uses updateRock()
+   - No updateDoc calls before creation (prevents permission-denied / missing-doc issues)
+   - "Saved" shown as calm status, not button clutter
    ============================================================ */
 
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { updateRock } from "@/lib/rocks";
 import { Button } from "@/components/Button";
+import StepDraft from "@/components/rock/StepDraft";
+import { createRockWithId, updateRock } from "@/lib/rocks";
 
 type Step = 1 | 2 | 3 | 4 | 5;
 
@@ -22,6 +27,8 @@ type Props = {
   initialRock: any;
 };
 
+type BannerMsg = { kind: "error" | "ok"; text: string } | null;
+
 function safeStr(v: any): string {
   if (typeof v === "string") return v;
   if (v === null || v === undefined) return "";
@@ -30,6 +37,10 @@ function safeStr(v: any): string {
   } catch {
     return "";
   }
+}
+
+function safeTrim(v: any): string {
+  return typeof v === "string" ? v.trim() : "";
 }
 
 function clampStep(v: any): Step {
@@ -83,10 +94,10 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
 
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [banner, setBanner] = useState<BannerMsg>(null);
 
   const saveTimer = useRef<any>(null);
   const lastPatchRef = useRef<any>(null);
-
   const aliveRef = useRef(true);
 
   // Monotonic save sequencing prevents out-of-order overwrites
@@ -95,7 +106,16 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
   // Skip identical saves
   const lastPatchKeyRef = useRef<string>("");
 
-  // Alive guard (prevents setState after unmount)
+  // Track whether the Firestore doc exists yet (OPTION A)
+  const createdRef = useRef<boolean>(false);
+
+  // ✅ Once user navigates steps, do not let initialRock.step overwrite UI step
+  const userNavigatedStepRef = useRef(false);
+
+  // Optional AI state (kept minimal; StepDraft exposes only a click)
+  const [aiLoading, setAiLoading] = useState(false);
+
+  // Alive guard
   useEffect(() => {
     aliveRef.current = true;
     return () => {
@@ -103,6 +123,18 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
   }, []);
+
+  // Determine if doc is already created based on incoming data
+  useEffect(() => {
+    // If we have an initialRock with matching id and userId, assume it exists.
+    const hasDoc = !!initialRock && safeTrim(initialRock?.userId) && safeTrim(initialRock?.id || rockId);
+    createdRef.current = hasDoc;
+  }, [initialRock, rockId]);
+
+  // Reset user navigation flag when switching to a different rock
+  useEffect(() => {
+    userNavigatedStepRef.current = false;
+  }, [rockId]);
 
   // Keep local state in sync if parent reloads initialRock (rare, but safe).
   useEffect(() => {
@@ -115,16 +147,69 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
       milestones: Array.isArray((initialRock || {})?.milestones) ? initialRock.milestones : prev?.milestones ?? [],
     }));
 
-    // Only update step if the loaded rock has a valid step
-    if (initialRock && initialRock.step !== undefined) {
+    // ✅ Only apply initialRock.step until the user starts navigating
+    if (!userNavigatedStepRef.current && initialRock && initialRock.step !== undefined) {
       setStep(clampStep(initialRock.step));
     }
   }, [rockId, uid, initialRock]);
 
   const title = useMemo(() => safeStr(rock?.title) || "Rock", [rock?.title]);
-  const statement = useMemo(() => safeStr(rock?.statement), [rock?.statement]);
+
+  const hasContent = useMemo(() => {
+    const t = safeTrim(rock?.title);
+    const d = safeTrim(rock?.draft);
+    return t.length > 0 || d.length > 0;
+  }, [rock?.title, rock?.draft]);
+
+  // -----------------------------
+  // Creation + saving
+  // -----------------------------
+
+  async function ensureCreated(): Promise<boolean> {
+    if (createdRef.current) return true;
+
+    if (!uid || !rockId) {
+      setSaveState("failed");
+      setSaveError("Missing user or rock id.");
+      setBanner({ kind: "error", text: "Missing user or rock id." });
+      return false;
+    }
+
+    try {
+      setSaveError(null);
+      setBanner(null);
+      setSaveState("saving");
+
+      const payload = stripUndefinedDeep({
+        ...rock,
+        id: rockId,
+        userId: uid,
+        step,
+      });
+
+      await createRockWithId(uid, rockId, payload);
+
+      if (!aliveRef.current) return false;
+
+      createdRef.current = true;
+      setSaveState("saved");
+      setBanner({ kind: "ok", text: "Saved." });
+      return true;
+    } catch (e: any) {
+      devError("[RockBuilder] createRockWithId failed:", e);
+      if (!aliveRef.current) return false;
+
+      setSaveState("failed");
+      setSaveError(e?.message || "Save failed.");
+      setBanner({ kind: "error", text: e?.message || "Save failed." });
+      return false;
+    }
+  }
 
   function scheduleSave(patch: any) {
+    // No autosave until created (prevents updateDoc on missing doc)
+    if (!createdRef.current) return;
+
     const cleaned = stripUndefinedDeep(patch || {});
     const patchKey = stableStringify(cleaned);
 
@@ -136,6 +221,7 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
 
     if (aliveRef.current) {
       setSaveError(null);
+      setBanner(null);
       setSaveState("saving");
     }
 
@@ -164,35 +250,6 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
     }, 450);
   }
 
-  function updateField(path: string, value: any) {
-    setRock((prev: any) => {
-      const next = { ...(prev || {}) };
-      const parts = path.split(".");
-      let cur: any = next;
-
-      for (let i = 0; i < parts.length - 1; i++) {
-        const key = parts[i]!;
-        cur[key] = cur[key] && typeof cur[key] === "object" ? { ...cur[key] } : {};
-        cur = cur[key];
-      }
-
-      cur[parts[parts.length - 1]!] = value;
-
-      const patch: any = {};
-      let pcur: any = patch;
-      for (let i = 0; i < parts.length - 1; i++) {
-        const key = parts[i]!;
-        pcur[key] = pcur[key] && typeof pcur[key] === "object" ? pcur[key] : {};
-        pcur = pcur[key];
-      }
-      pcur[parts[parts.length - 1]!] = value;
-
-      scheduleSave(patch);
-
-      return next;
-    });
-  }
-
   function setMany(patch: any) {
     setRock((prev: any) => {
       const next = { ...(prev || {}), ...(patch || {}) };
@@ -201,23 +258,18 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
     });
   }
 
-  // ✅ NEW: Pill-friendly step setter that persists step
+  // Footer step navigation (pills still allowed, but footer is the only CTA zone)
   function goToStep(target: Step) {
+    userNavigatedStepRef.current = true;
     setStep(() => {
+      // Persist step only if created
       scheduleSave({ step: target });
       return target;
     });
   }
 
-  function nextStep() {
-    setStep((s) => {
-      const ns = s < 5 ? ((s + 1) as Step) : s;
-      scheduleSave({ step: ns });
-      return ns;
-    });
-  }
-
   function prevStep() {
+    userNavigatedStepRef.current = true;
     setStep((s) => {
       const ps = s > 1 ? ((s - 1) as Step) : s;
       scheduleSave({ step: ps });
@@ -225,18 +277,105 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
     });
   }
 
-  function buildFinalFromSmart() {
-    const s = safeStr(rock?.smart?.specific).trim();
-    const m = safeStr(rock?.smart?.measurable).trim();
-    const t = safeStr(rock?.smart?.timebound).trim();
+  async function primaryAction() {
+    // One primary action per step
+    if (step === 1) {
+      // Create if needed, then advance
+      const ok = await ensureCreated();
+      if (!ok) return;
+      goToStep(2);
+      return;
+    }
 
-    const base = s || statement || title;
-    const metric = m ? ` (${m})` : "";
-    const due = t ? ` — Due ${t}` : "";
+    if (step === 2) {
+      // Build final statement and go to Review
+      const s = safeStr(rock?.smart?.specific).trim();
+      const m = safeStr(rock?.smart?.measurable).trim();
+      const t = safeStr(rock?.smart?.timebound).trim();
 
-    const final = `${base}${metric}${due}`.trim();
-    setMany({ finalStatement: final });
+      const base = s || safeStr(rock?.draft).trim() || safeStr(rock?.title).trim() || "Rock";
+      const metric = m ? ` (${m})` : "";
+      const due = t ? ` — Due ${t}` : "";
+
+      const final = `${base}${metric}${due}`.trim();
+
+      setMany({ finalStatement: final });
+      goToStep(5);
+      return;
+    }
+
+    if (step === 3) {
+      goToStep(4);
+      return;
+    }
+
+    if (step === 4) {
+      goToStep(5);
+      return;
+    }
+
+    if (step === 5) {
+      // "Done" just ensures created + saves any last patch.
+      const ok = await ensureCreated();
+      if (!ok) return;
+
+      // No routing here (keep it calm). You can wire a "Back to dashboard" later if desired.
+      setBanner({ kind: "ok", text: "All set." });
+      return;
+    }
   }
+
+  async function saveNow() {
+    await ensureCreated();
+  }
+
+  async function runAiAssist() {
+    const draft = safeStr(rock?.draft).trim();
+    if (!draft) return;
+
+    setAiLoading(true);
+    setBanner(null);
+
+    try {
+      const res = await fetch("/api/rock-suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draft }),
+      });
+
+      if (!res.ok) throw new Error(`AI request failed (${res.status})`);
+
+      const data = await res.json();
+      const first = Array.isArray(data?.suggestions) ? data.suggestions?.[0] : null;
+      const suggestion = safeStr(first?.text).trim();
+
+      if (suggestion) {
+        // Put it where Step 5 can show it
+        setMany({ suggestedImprovement: suggestion });
+        goToStep(5);
+        setBanner({ kind: "ok", text: "AI suggestion added to Review." });
+      } else {
+        setBanner({ kind: "error", text: "No AI suggestions returned." });
+      }
+    } catch (e: any) {
+      devError("[RockBuilder] /api/rock-suggest failed:", e);
+      setBanner({ kind: "error", text: "AI suggestions are temporarily unavailable." });
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  const primaryLabel = useMemo(() => {
+    if (step === 1) return createdRef.current ? "Continue → SMART" : "Save & Continue → SMART";
+    if (step === 2) return "Build Final Statement";
+    if (step === 3) return "Continue → Milestones";
+    if (step === 4) return "Continue → Review";
+    return "Done";
+  }, [step]);
+
+  // -----------------------------
+  // UI
+  // -----------------------------
 
   return (
     <div style={page}>
@@ -246,13 +385,14 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
             <span style={brandOrange}>Pocket</span>
             <span style={brandWhite}>Rocks</span>
           </div>
-          <div style={crumb}>ROCK · {stepLabel(step)}</div>
+          <div style={crumb}>ROCK · {stepName(step)}</div>
         </div>
 
-        <div style={savePillWrap}>
-          {saveState === "saving" && <div style={pill}>Saving…</div>}
-          {saveState === "saved" && <div style={{ ...pill, opacity: 0.85 }}>Saved</div>}
-          {saveState === "failed" && <div style={{ ...pill, ...pillFail }}>Save failed</div>}
+        {/* Calm status (not a big “button-like” pill) */}
+        <div style={statusWrap}>
+          {saveState === "saving" && <div style={statusText}>Saving…</div>}
+          {saveState === "saved" && <div style={{ ...statusText, opacity: 0.8 }}>Saved</div>}
+          {saveState === "failed" && <div style={{ ...statusText, ...statusFail }}>Save failed</div>}
         </div>
       </div>
 
@@ -261,7 +401,7 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
           <div>
             <div style={eyebrow}>{stepName(step)}</div>
             <div style={h1}>{title}</div>
-            {statement ? <div style={sub}>{statement}</div> : <div style={subMuted}>Build clear Rocks. Track them weekly.</div>}
+            <div style={subMuted}>Build clear Rocks. Track them weekly.</div>
           </div>
 
           <div style={stepPills}>
@@ -278,10 +418,29 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
               4. Milestones
             </StepPill>
             <StepPill active={step === 5} onClick={() => goToStep(5)}>
-              5. Review + AI
+              5. Review
             </StepPill>
           </div>
         </div>
+
+        {banner && (
+          <div
+            style={{
+              margin: "0 18px 10px",
+              padding: 14,
+              borderRadius: 14,
+              border:
+                banner.kind === "error"
+                  ? "1px solid rgba(255,80,80,0.35)"
+                  : "1px solid rgba(80,255,170,0.22)",
+              background:
+                banner.kind === "error" ? "rgba(255,80,80,0.10)" : "rgba(80,255,170,0.10)",
+              fontSize: 14,
+            }}
+          >
+            {banner.text}
+          </div>
+        )}
 
         {saveError && (
           <div style={alert}>
@@ -290,52 +449,37 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
           </div>
         )}
 
+        {/* ======================================================
+            STEP 1 — DRAFT (content-only)
+           ====================================================== */}
         {step === 1 && (
           <div style={section}>
-            <div style={sectionTitle}>Step 1 — Draft</div>
-            <div style={sectionHint}>Capture the goal in plain language. You can refine it later.</div>
-
-            <label style={label}>
-              <div style={labelText}>Title</div>
-              <input
-                style={input}
-                value={safeStr(rock?.title)}
-                onChange={(e) => updateField("title", e.target.value)}
-                placeholder="New Rock"
-              />
-            </label>
-
-            <label style={label}>
-              <div style={labelText}>Draft Rock statement</div>
-              <textarea
-                style={textarea}
-                value={safeStr(rock?.statement)}
-                onChange={(e) => updateField("statement", e.target.value)}
-                placeholder="Write a clear, outcome-based statement…"
-              />
-            </label>
+            <StepDraft
+              rock={rock}
+              onChange={(next) => setMany(next)}
+              saving={saveState === "saving"}
+              saved={saveState === "saved"}
+              banner={null}
+              canInteract={!aiLoading}
+              onImproveWithAI={aiLoading ? undefined : runAiAssist}
+            />
           </div>
         )}
 
+        {/* ======================================================
+            STEP 2 — SMART
+           ====================================================== */}
         {step === 2 && (
           <div style={section}>
-            <div style={sectionTopRow}>
-              <div>
-                <div style={sectionTitle}>Step 2 — SMART coaching</div>
-                <div style={sectionHint}>Answer each one in simple words. These answers become your Rock&apos;s backbone.</div>
-              </div>
-
-              <Button type="button" onClick={buildFinalFromSmart}>
-                Build Final Statement
-              </Button>
-            </div>
+            <div style={sectionTitle}>SMART coaching</div>
+            <div style={sectionHint}>Answer each one in simple words. These become your Rock’s backbone.</div>
 
             <label style={label}>
               <div style={labelText}>Specific — What exactly will be different when this is done?</div>
               <textarea
                 style={textarea}
                 value={safeStr(rock?.smart?.specific)}
-                onChange={(e) => updateField("smart.specific", e.target.value)}
+                onChange={(e) => setMany({ smart: { ...(rock?.smart || {}), specific: e.target.value } })}
                 placeholder="What will be true when this Rock is complete?"
               />
             </label>
@@ -345,7 +489,7 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
               <textarea
                 style={textarea}
                 value={safeStr(rock?.smart?.measurable)}
-                onChange={(e) => updateField("smart.measurable", e.target.value)}
+                onChange={(e) => setMany({ smart: { ...(rock?.smart || {}), measurable: e.target.value } })}
                 placeholder="Numbers, counts, percentages, deadlines."
               />
             </label>
@@ -355,7 +499,7 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
               <textarea
                 style={textarea}
                 value={safeStr(rock?.smart?.achievable)}
-                onChange={(e) => updateField("smart.achievable", e.target.value)}
+                onChange={(e) => setMany({ smart: { ...(rock?.smart || {}), achievable: e.target.value } })}
                 placeholder="Resources, capacity, scope boundaries."
               />
             </label>
@@ -365,7 +509,7 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
               <textarea
                 style={textarea}
                 value={safeStr(rock?.smart?.relevant)}
-                onChange={(e) => updateField("smart.relevant", e.target.value)}
+                onChange={(e) => setMany({ smart: { ...(rock?.smart || {}), relevant: e.target.value } })}
                 placeholder="What does it support? What problem does it solve?"
               />
             </label>
@@ -375,79 +519,127 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
               <input
                 style={input}
                 value={safeStr(rock?.smart?.timebound)}
-                onChange={(e) => updateField("smart.timebound", e.target.value)}
+                onChange={(e) => setMany({ smart: { ...(rock?.smart || {}), timebound: e.target.value } })}
                 placeholder="e.g., Jan 31"
               />
             </label>
           </div>
         )}
 
+        {/* ======================================================
+            STEP 3 — METRICS
+           ====================================================== */}
         {step === 3 && (
           <div style={section}>
-            <div style={sectionTitle}>Step 3 — Metrics</div>
+            <div style={sectionTitle}>Metrics</div>
             <div style={sectionHint}>Add 1–3 metrics you will track weekly.</div>
 
             <textarea
               style={textarea}
               value={safeStr(rock?.metricsText)}
-              onChange={(e) => updateField("metricsText", e.target.value)}
+              onChange={(e) => setMany({ metricsText: e.target.value })}
               placeholder="Example: Weekly customer response time (minutes)…"
             />
           </div>
         )}
 
+        {/* ======================================================
+            STEP 4 — MILESTONES
+           ====================================================== */}
         {step === 4 && (
           <div style={section}>
-            <div style={sectionTitle}>Step 4 — Milestones</div>
+            <div style={sectionTitle}>Milestones</div>
             <div style={sectionHint}>List key milestones (simple is fine).</div>
 
             <textarea
               style={textarea}
               value={safeStr(rock?.milestonesText)}
-              onChange={(e) => updateField("milestonesText", e.target.value)}
+              onChange={(e) => setMany({ milestonesText: e.target.value })}
               placeholder={"Example:\n- Week 1: Define process\n- Week 3: Pilot\n- Week 6: Rollout"}
             />
           </div>
         )}
 
+        {/* ======================================================
+            STEP 5 — REVIEW
+           ====================================================== */}
         {step === 5 && (
           <div style={section}>
-            <div style={sectionTitle}>Step 5 — Review + AI</div>
-            <div style={sectionHint}>Review your Rock. Save anytime.</div>
+            <div style={sectionTitle}>Review</div>
+            <div style={sectionHint}>Make it clear. Don’t overthink it.</div>
 
             <label style={label}>
               <div style={labelText}>Final Rock statement</div>
               <textarea
                 style={textarea}
                 value={safeStr(rock?.finalStatement)}
-                onChange={(e) => updateField("finalStatement", e.target.value)}
+                onChange={(e) => setMany({ finalStatement: e.target.value })}
                 placeholder="This is what you’ll share with your leadership team."
               />
             </label>
 
             <label style={label}>
-              <div style={labelText}>Suggested Improvement</div>
+              <div style={labelText}>AI suggestion (optional)</div>
               <textarea
                 style={textarea}
                 value={safeStr(rock?.suggestedImprovement)}
-                onChange={(e) => updateField("suggestedImprovement", e.target.value)}
-                placeholder="Type a clearer, more specific version…"
+                onChange={(e) => setMany({ suggestedImprovement: e.target.value })}
+                placeholder="If you used AI, it will appear here. Edit freely."
               />
-              <div style={tip}>Tip: Don’t perfect it. Just make it clearer.</div>
             </label>
           </div>
         )}
 
+        {/* ======================================================
+            FOOTER — THE ONLY NAVIGATION AREA
+           ====================================================== */}
         <div style={footer}>
-          <div style={footerLeft}>Step {step} of 5</div>
+          <div style={footerLeft}>
+            <div style={{ opacity: 0.7 }}>Step {step} of 5</div>
+
+            {/* Quiet "save now" (only visible if doc not created yet or if user wants reassurance) */}
+            <button
+              type="button"
+              onClick={saveNow}
+              disabled={saveState === "saving" || !hasContent}
+              style={{
+                marginLeft: 12,
+                appearance: "none",
+                border: "none",
+                background: "transparent",
+                color: "rgba(255,255,255,0.78)",
+                fontWeight: 850,
+                cursor: saveState === "saving" || !hasContent ? "default" : "pointer",
+                opacity: saveState === "saving" || !hasContent ? 0.45 : 0.9,
+                textDecoration: "underline",
+              }}
+            >
+              Save now
+            </button>
+          </div>
 
           <div style={footerRight}>
-            <Button type="button" onClick={prevStep} disabled={step === 1}>
+            <button
+              type="button"
+              onClick={prevStep}
+              disabled={step === 1}
+              style={{
+                appearance: "none",
+                border: "1px solid rgba(255,255,255,0.14)",
+                background: "rgba(255,255,255,0.04)",
+                color: "rgba(255,255,255,0.85)",
+                borderRadius: 14,
+                padding: "10px 14px",
+                fontWeight: 850,
+                cursor: step === 1 ? "default" : "pointer",
+                opacity: step === 1 ? 0.45 : 1,
+              }}
+            >
               Back
-            </Button>
+            </button>
 
-            <Button type="button" onClick={nextStep} disabled={step === 5}>
-              Continue
+            <Button type="button" onClick={primaryAction} disabled={step === 1 && !hasContent}>
+              {primaryLabel}
             </Button>
           </div>
         </div>
@@ -494,12 +686,8 @@ function stepName(step: Step) {
     case 4:
       return "MILESTONES";
     case 5:
-      return "REVIEW + AI";
+      return "REVIEW";
   }
-}
-
-function stepLabel(step: Step) {
-  return stepName(step);
 }
 
 /* -----------------------------
@@ -521,6 +709,23 @@ const topBar: React.CSSProperties = {
   justifyContent: "space-between",
   alignItems: "flex-start",
   gap: 16,
+};
+
+const statusWrap: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  marginTop: 6,
+};
+
+const statusText: React.CSSProperties = {
+  fontSize: 13,
+  fontWeight: 850,
+  opacity: 0.9,
+};
+
+const statusFail: React.CSSProperties = {
+  color: "rgba(255,140,140,0.95)",
 };
 
 const brandRow: React.CSSProperties = {
@@ -549,27 +754,6 @@ const crumb: React.CSSProperties = {
   fontSize: 12,
   letterSpacing: 2.5,
   opacity: 0.55,
-};
-
-const savePillWrap: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 10,
-  marginTop: 6,
-};
-
-const pill: React.CSSProperties = {
-  padding: "8px 12px",
-  borderRadius: 999,
-  fontSize: 13,
-  fontWeight: 800,
-  border: "1px solid rgba(255,255,255,0.14)",
-  background: "rgba(255,255,255,0.08)",
-};
-
-const pillFail: React.CSSProperties = {
-  border: "1px solid rgba(255,80,80,0.35)",
-  background: "rgba(255,80,80,0.12)",
 };
 
 const card: React.CSSProperties = {
@@ -604,11 +788,6 @@ const h1: React.CSSProperties = {
   letterSpacing: -0.4,
 };
 
-const sub: React.CSSProperties = {
-  marginTop: 6,
-  opacity: 0.75,
-};
-
 const subMuted: React.CSSProperties = {
   marginTop: 6,
   opacity: 0.6,
@@ -625,7 +804,7 @@ const pillBtn: React.CSSProperties = {
   borderRadius: 999,
   padding: "8px 12px",
   fontSize: 13,
-  fontWeight: 800,
+  fontWeight: 850,
   border: "1px solid rgba(255,255,255,0.12)",
   background: "rgba(255,255,255,0.06)",
   color: "rgba(255,255,255,0.86)",
@@ -663,14 +842,6 @@ const section: React.CSSProperties = {
   gap: 14,
 };
 
-const sectionTopRow: React.CSSProperties = {
-  display: "flex",
-  alignItems: "flex-start",
-  justifyContent: "space-between",
-  gap: 12,
-  flexWrap: "wrap",
-};
-
 const sectionTitle: React.CSSProperties = {
   fontSize: 22,
   fontWeight: 900,
@@ -689,7 +860,7 @@ const label: React.CSSProperties = {
 
 const labelText: React.CSSProperties = {
   fontSize: 14,
-  fontWeight: 800,
+  fontWeight: 850,
   opacity: 0.85,
 };
 
@@ -717,12 +888,6 @@ const textarea: React.CSSProperties = {
   whiteSpace: "pre-wrap",
 };
 
-const tip: React.CSSProperties = {
-  marginTop: 6,
-  fontSize: 13,
-  opacity: 0.6,
-};
-
 const footer: React.CSSProperties = {
   padding: "14px 18px",
   borderTop: "1px solid rgba(255,255,255,0.08)",
@@ -735,10 +900,14 @@ const footer: React.CSSProperties = {
 
 const footerLeft: React.CSSProperties = {
   fontSize: 13,
-  opacity: 0.65,
+  opacity: 0.75,
+  display: "flex",
+  alignItems: "center",
+  gap: 0,
 };
 
 const footerRight: React.CSSProperties = {
   display: "flex",
   gap: 10,
+  alignItems: "center",
 };

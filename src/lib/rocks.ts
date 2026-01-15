@@ -3,7 +3,8 @@
 
    SCOPE:
    Rock persistence (STABILITY HARDENED)
-   - saveRock(): create new Rock
+   - saveRock(): create new Rock (auto-id)
+   - createRockWithId(): create Rock with a specific id (OPTION A)
    - getRock(): read Rock (user-scoped)
    - updateRock(): patch existing Rock (user-scoped)
    - Never sends undefined to Firestore
@@ -17,6 +18,7 @@ import {
   doc,
   getDoc,
   serverTimestamp,
+  setDoc,
   updateDoc,
   type DocumentData,
   type Firestore,
@@ -106,6 +108,10 @@ function requireDb(): Firestore {
    Create
 ------------------------------ */
 
+/**
+ * Creates a Rock with an auto-generated id (legacy / optional use).
+ * Returns the new document id.
+ */
 export async function saveRock(input: Partial<Rock>, userId: string): Promise<string> {
   const uid = safeTrim(userId);
   if (!uid) throw new Error("auth: Missing userId.");
@@ -124,6 +130,43 @@ export async function saveRock(input: Partial<Rock>, userId: string): Promise<st
     return ref.id;
   } catch (e: any) {
     devError("[saveRock]", e);
+    throw new Error(firebaseErrorMessage(e));
+  }
+}
+
+/**
+ * OPTION A:
+ * Creates a Rock using a specific rockId (the id in the URL).
+ * This makes /rocks/[rockId] a single-flow page that can create-on-save.
+ */
+export async function createRockWithId(
+  userId: string,
+  rockId: string,
+  input: Partial<Rock>
+): Promise<void> {
+  const uid = safeTrim(userId);
+  const rid = safeTrim(rockId);
+
+  if (!uid) throw new Error("auth: Missing userId.");
+  if (!rid) throw new Error("createRockWithId: Missing rockId.");
+
+  const firestore = requireDb();
+
+  try {
+    const ref = doc(firestore, ROCKS_COLLECTION, rid);
+
+    const payload = {
+      ...stripUndefinedDeep(input),
+      id: rid,
+      userId: uid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    // Create (or overwrite) the doc using the exact rid
+    await setDoc(ref, payload);
+  } catch (e: any) {
+    devError("[createRockWithId]", e);
     throw new Error(firebaseErrorMessage(e));
   }
 }
