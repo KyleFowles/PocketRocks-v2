@@ -2,258 +2,265 @@
    FILE: src/app/rocks/new/page.tsx
 
    SCOPE:
-   Rebuild /rocks/new as a true mobile-first data-entry flow (Responsive):
-   - Collapsed header (no hero)
-   - Draft input dominates the viewport
-   - Sticky bottom progress
-   - Improve mode uses the same pattern
-
-   BUILD FIX:
-   Project saveRock() expects 2 arguments (not 3).
-   This page now calls saveRock(rockId, rock).
-
-   BUTTON SYSTEM:
-   - Uses shared <Button> component (no Tailwind orange / hard-coded brand colors)
-   - Crisp, consistent CTA styling managed in one place (src/components/Button.tsx)
-
-   ASSUMES:
-   - useAuth at "@/lib/useAuth"
-   - saveRock at "@/lib/rocks" supports (rockId, rock)
-   - /api/rock-suggest endpoint exists
+   Create Rock (Step 1) — CHARTER HARDENED (FINAL SCRUB)
+   - Guards inside the action handler (not just UI)
+   - Never uses non-null assertions (no user!)
+   - No unnecessary casting
+   - Clean success flow: Save now shows message, Continue routes
+   - Prevents setState after route/unmount
+   - Uses shared Button component (keeps hover/halo)
+   - Self-styled layout (no pr-* dependencies)
+   - Sticky footer (no overlap) with clean spacing
    ============================================================ */
 
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import CollapsedHeader from "@/components/rock/CollapsedHeader";
-import DraftMode from "@/components/rock/DraftMode";
-import ImproveMode, { type ImproveSuggestion } from "@/components/rock/ImproveMode";
-
-import { useAuth } from "@/lib/useAuth";
 import { saveRock } from "@/lib/rocks";
-import type { Rock } from "@/types/rock";
+import { useAuth } from "@/lib/useAuth";
 import { Button } from "@/components/Button";
 
-type Mode = "draft" | "improve";
-
-async function fetchSuggestion(text: string): Promise<string> {
-  const res = await fetch("/api/rock-suggest", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
-  });
-  if (!res.ok) throw new Error("suggest_failed");
-  const data = await res.json();
-
-  const first =
-    (Array.isArray(data?.suggestions) ? data.suggestions[0] : null) ??
-    (typeof data?.suggestion === "string" ? data.suggestion : null) ??
-    (typeof data?.text === "string" ? data.text : null);
-
-  const cleaned = typeof first === "string" ? first.trim() : "";
-  if (!cleaned) throw new Error("empty_suggestion");
-  return cleaned;
+function safeTrim(v: unknown) {
+  return typeof v === "string" ? v.trim() : "";
 }
 
-function newId(): string {
-  if (typeof crypto !== "undefined" && typeof (crypto as any).randomUUID === "function") {
-    return (crypto as any).randomUUID();
-  }
-  return `rock_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-}
+type BannerMsg = { kind: "error" | "ok"; text: string } | null;
 
 export default function NewRockPage() {
   const router = useRouter();
-  const { uid, loading } = useAuth();
+  const { user, loading } = useAuth();
 
-  const [mode, setMode] = useState<Mode>("draft");
-
-  const [rockId, setRockId] = useState<string | null>(null);
-  const [rock, setRock] = useState<Rock | null>(null);
+  const [title, setTitle] = useState("");
+  const [draft, setDraft] = useState("");
 
   const [saving, setSaving] = useState(false);
-  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  const [message, setMessage] = useState<BannerMsg>(null);
 
-  const [suggestion, setSuggestion] = useState<ImproveSuggestion | null>(null);
-  const [loadingSuggestion, setLoadingSuggestion] = useState(false);
-  const [suggestionError, setSuggestionError] = useState<string | null>(null);
+  // prevent state updates after route/unmount
+  const aliveRef = useRef(true);
+  const didRouteRef = useRef(false);
 
-  // Minimal “new rock” initialization
   useEffect(() => {
-    if (!uid) return;
+    aliveRef.current = true;
+    didRouteRef.current = false;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
 
-    setRockId((prev) => prev ?? newId());
+  const uid = user?.uid ?? null;
 
-    setRock((prev) => {
-      if (prev) return prev;
+  const canSubmit = useMemo(() => {
+    if (loading) return false;
+    if (!uid) return false;
+    return true;
+  }, [loading, uid]);
 
-      const initial: any = {
-        title: "",
-        statement: "",
-        status: "on-track",
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+  async function onSave(opts: { thenRoute: boolean }) {
+    // Charter: guard inside the handler too
+    if (loading) {
+      setMessage({ kind: "error", text: "Still loading. Try again in a moment." });
+      return;
+    }
+    if (!uid) {
+      setMessage({ kind: "error", text: "You’re not signed in. Please log in and try again." });
+      return;
+    }
+    if (saving) return;
+
+    setMessage(null);
+    setSaving(true);
+
+    try {
+      const rock = {
+        title: safeTrim(title),
+        draft: safeTrim(draft),
+        step: 1,
       };
 
-      return initial as Rock;
-    });
-  }, [uid]);
+      const id = await saveRock(rock, uid);
 
-  const title = (rock as any)?.title ?? "";
-  const statement = (rock as any)?.statement ?? (rock as any)?.finalStatement ?? "";
+      // If we’re routing, avoid extra UI updates.
+      if (opts.thenRoute) {
+        didRouteRef.current = true;
+        router.push(`/rocks/${id}`);
+        return;
+      }
 
-  async function saveNow(nextRock?: Rock): Promise<void> {
-    if (!uid || !rock || !rockId) return;
-
-    setSaving(true);
-    try {
-      const toSave: any = nextRock ?? rock;
-      toSave.updatedAt = Date.now();
-
-      setRock(toSave as Rock);
-
-      // ✅ BUILD FIX: saveRock expects 2 args in this project
-      await saveRock(rockId, toSave as Rock);
-
-      setLastSavedAt(Date.now());
-
-      // Stable URL after first save
-      router.replace(`/rocks/${rockId}`);
+      if (!aliveRef.current) return;
+      setMessage({ kind: "ok", text: `Saved. Rock ID: ${id}` });
+    } catch (e: any) {
+      const text = typeof e?.message === "string" ? e.message : "Save failed.";
+      if (!aliveRef.current) return;
+      setMessage({ kind: "error", text });
     } finally {
+      // If we routed away, skip state updates.
+      if (!aliveRef.current) return;
+      if (didRouteRef.current) return;
       setSaving(false);
     }
   }
 
-  async function enterImprove() {
-    setMode("improve");
-
-    const txt = statement?.trim();
-    if (!txt) {
-      setSuggestion(null);
-      setSuggestionError("Write a draft first.");
-      return;
-    }
-
-    setLoadingSuggestion(true);
-    setSuggestionError(null);
-
-    try {
-      const s = await fetchSuggestion(txt);
-      setSuggestion({ id: "rec", text: s, recommended: true });
-    } catch {
-      setSuggestion(null);
-      setSuggestionError("Could not generate a suggestion.");
-    } finally {
-      setLoadingSuggestion(false);
-    }
-  }
-
-  async function requestAnother() {
-    const txt = statement?.trim();
-    if (!txt) return;
-
-    setLoadingSuggestion(true);
-    setSuggestionError(null);
-    try {
-      const s = await fetchSuggestion(txt);
-      setSuggestion({ id: String(Date.now()), text: s });
-    } catch {
-      setSuggestionError("Could not generate a suggestion.");
-    } finally {
-      setLoadingSuggestion(false);
-    }
-  }
-
-  async function applySuggestion(nextText: string) {
-    if (!rock) return;
-
-    const nextRock: any = { ...rock };
-
-    if (Object.prototype.hasOwnProperty.call(nextRock, "statement")) {
-      nextRock.statement = nextText;
-    } else {
-      nextRock.finalStatement = nextText;
-    }
-
-    nextRock.updatedAt = Date.now();
-    setRock(nextRock as Rock);
-
-    // Persist immediately if we can
-    if (rockId) {
-      await saveRock(rockId, nextRock as Rock);
-      setLastSavedAt(Date.now());
-      router.replace(`/rocks/${rockId}`);
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center text-white/70">
-        Loading…
-      </div>
-    );
-  }
-
-  if (!uid) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center px-6">
-        <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-5">
-          <div className="mb-2 font-semibold text-white">Please sign in</div>
-          <div className="mb-4 text-sm text-white/70">
-            You need an account to create Rocks.
-          </div>
-
-          <Button type="button" className="w-full" onClick={() => router.push("/login")}>
-            Go to Login
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="w-full">
-      <CollapsedHeader
-        titleLeft="Create Rock"
-        titleRight={mode === "draft" ? "Draft" : "Improve"}
-        rightSlot={lastSavedAt ? <span className="text-white/55">Saved</span> : null}
-      />
+    <main
+      style={{
+        padding: 24,
+        maxWidth: 980,
+        margin: "0 auto",
+        // reserve space so the sticky footer never covers content
+        paddingBottom: 120,
+      }}
+    >
+      {/* Header */}
+      <header style={{ marginBottom: 18 }}>
+        <div style={{ opacity: 0.6, fontSize: 12, letterSpacing: 2, marginBottom: 6 }}>DRAFT</div>
+        <h1 style={{ fontSize: 54, lineHeight: 1.05, margin: "0 0 10px", fontWeight: 800 }}>
+          Start your Rock
+        </h1>
+        <p style={{ opacity: 0.8, margin: 0, fontSize: 18 }}>
+          Capture the goal in plain language. You can refine it later.
+        </p>
+      </header>
 
-      {mode === "draft" ? (
-        <DraftMode
-          draft={statement}
-          title={title}
-          saving={saving}
-          lastSavedAt={lastSavedAt}
-          onChangeDraft={(next) => {
-            setRock((prev: any) => {
-              if (!prev) return prev;
-              const hasStatement = Object.prototype.hasOwnProperty.call(prev, "statement");
-              return hasStatement
-                ? { ...prev, statement: next }
-                : { ...prev, finalStatement: next };
-            });
+      {/* Message banner */}
+      {message && (
+        <div
+          style={{
+            marginBottom: 18,
+            padding: "12px 14px",
+            borderRadius: 16,
+            border: "1px solid rgba(255,255,255,0.18)",
+            background:
+              message.kind === "error"
+                ? "rgba(240, 78, 35, 0.14)"
+                : "rgba(0, 200, 120, 0.12)",
           }}
-          onChangeTitle={(next) =>
-            setRock((prev: any) => (prev ? { ...prev, title: next } : prev))
-          }
-          onSaveNow={async () => saveNow()}
-          onContinue={enterImprove}
-        />
-      ) : (
-        <ImproveMode
-          draftText={statement}
-          rockTitle={title}
-          suggestion={suggestion}
-          loadingSuggestion={loadingSuggestion}
-          suggestionError={suggestionError}
-          onRequestAnother={requestAnother}
-          onApplySuggestion={applySuggestion}
-          onBackToDraft={() => setMode("draft")}
-        />
+        >
+          <div style={{ fontWeight: 800, marginBottom: 4 }}>
+            {message.kind === "error" ? "Save failed" : "Saved"}
+          </div>
+          <div style={{ opacity: 0.92 }}>{message.text}</div>
+        </div>
       )}
-    </div>
+
+      {/* Not signed in banner */}
+      {!loading && !uid && (
+        <div
+          style={{
+            marginBottom: 18,
+            padding: "12px 14px",
+            borderRadius: 16,
+            border: "1px solid rgba(255,255,255,0.18)",
+            background: "rgba(255,255,255,0.06)",
+          }}
+        >
+          <div style={{ fontWeight: 800, marginBottom: 4 }}>You’re not signed in.</div>
+          <div style={{ opacity: 0.9 }}>Please log in, then come back to create a Rock.</div>
+        </div>
+      )}
+
+      {/* Form panel */}
+      <section
+        style={{
+          borderRadius: 24,
+          border: "1px solid rgba(255,255,255,0.14)",
+          background: "rgba(255,255,255,0.04)",
+          padding: 18,
+        }}
+      >
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ display: "block", fontWeight: 800, marginBottom: 8, opacity: 0.95 }}>
+            Title
+          </label>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="e.g., Clean the spas"
+            style={{
+              width: "100%",
+              padding: "14px 14px",
+              borderRadius: 16,
+              border: "1px solid rgba(255,255,255,0.16)",
+              background: "rgba(0,0,0,0.20)",
+              color: "inherit",
+              outline: "none",
+            }}
+          />
+        </div>
+
+        <div>
+          <label style={{ display: "block", fontWeight: 800, marginBottom: 8, opacity: 0.95 }}>
+            Draft Rock statement
+          </label>
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="e.g., Clean all the spas in Traverse City by March 31st."
+            rows={6}
+            style={{
+              width: "100%",
+              padding: "14px 14px",
+              borderRadius: 16,
+              border: "1px solid rgba(255,255,255,0.16)",
+              background: "rgba(0,0,0,0.20)",
+              color: "inherit",
+              outline: "none",
+              resize: "vertical",
+            }}
+          />
+        </div>
+      </section>
+
+      {/* Sticky footer */}
+      <footer
+        style={{
+          position: "fixed",
+          left: 0,
+          right: 0,
+          bottom: 18,
+          display: "flex",
+          justifyContent: "center",
+          pointerEvents: "none",
+        }}
+      >
+        <div
+          style={{
+            width: "min(980px, calc(100% - 48px))",
+            pointerEvents: "auto",
+            borderRadius: 22,
+            border: "1px solid rgba(255,255,255,0.12)",
+            background: "rgba(0,0,0,0.35)",
+            backdropFilter: "blur(12px)",
+            padding: 12,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+          }}
+        >
+          <div style={{ opacity: 0.8 }}>Draft · Step 1 of 5</div>
+
+          <div style={{ display: "flex", gap: 10 }}>
+            <Button
+              variant="secondary"
+              onClick={() => onSave({ thenRoute: false })}
+              disabled={!canSubmit || saving}
+            >
+              {saving ? "Saving…" : "Save now"}
+            </Button>
+
+            <Button
+              variant="primary"
+              onClick={() => onSave({ thenRoute: true })}
+              disabled={!canSubmit || saving}
+            >
+              {saving ? "Saving…" : "Continue"}
+            </Button>
+          </div>
+        </div>
+      </footer>
+    </main>
   );
 }

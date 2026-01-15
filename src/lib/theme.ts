@@ -1,239 +1,134 @@
 /* ============================================================
    FILE: src/lib/theme.ts
 
-   PURPOSE:
-   Centralized theme control for PocketRocks UI.
-
-   NEW MODEL (EASIER):
-   ------------------------------------------------------------
-   Instead of hand-picking every token, you pick ONE base color
-   (BASE_BUTTON_COLOR) and the system generates the full set of
-   button tokens automatically.
-
-   WHAT YOU EDIT MOST OFTEN:
-   ------------------------------------------------------------
-   1) BASE_BUTTON_COLOR
-      Example: "#3B7BFF"
-
-   OPTIONAL TUNING (rare):
-   ------------------------------------------------------------
-   You can adjust "depth" and "punch" in buildThemeFromBase()
-   if you want stronger gradients or glow.
-
-   WHY THIS IS BETTER:
-   ------------------------------------------------------------
-   - You don’t need to pick 10+ related colors manually
-   - The button always stays cohesive
-   - Theme changes are fast and safe
-
+   SCOPE:
+   Theme system (CHARTER SCRUB)
+   - Single source of truth for CSS variables used by Button + app chrome
+   - applyTheme() writes ONLY to :root and is safe to call multiple times
+   - Guarantees required variables exist (prevents “flat button” regressions)
+   - Covers both --focus-ring and --focus-ring-strong (globals.css + Button.tsx)
+   - Does not depend on Tailwind classes or missing CSS
    ============================================================ */
 
-export type ThemeTokens = {
-  /* Primary Button — Visual Roles */
-  buttonTop: string; // top highlight
-  buttonMain: string; // main body
-  buttonBottom: string; // bottom depth
+export type ThemeVars = Record<string, string>;
 
-  /* Primary Button — Surface Details */
-  buttonEdge: string; // border / edge line
-  buttonInnerTop: string; // inner highlight
-  buttonInnerBottom: string; // inner shadow
-  buttonSheen: string; // hover sheen sweep
-
-  /* Primary Button — Glow & Focus */
-  buttonGlow: string;
-  buttonGlowStrong: string;
-  focusRing: string;
-  focusRingStrong: string;
+export type Theme = {
+  name: string;
+  vars: ThemeVars;
 };
 
-export type ThemeBuildOptions = {
-  depth?: number; // 0..1  (gradient strength)
-  punch?: number; // 0..1  (glow/ring strength)
-};
-
-export const BASE_BUTTON_COLOR = "#3B7BFF"; // ✅ change this most often
-
-// ---------- Color helpers (small + reliable) ----------
-
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
-}
-
-function hexToRgb(hex: string) {
-  const s = hex.replace("#", "").trim();
-  if (!/^[0-9a-fA-F]{6}$/.test(s)) return null;
-  const r = parseInt(s.slice(0, 2), 16);
-  const g = parseInt(s.slice(2, 4), 16);
-  const b = parseInt(s.slice(4, 6), 16);
-  return { r, g, b };
-}
-
-function rgbToHex(r: number, g: number, b: number) {
-  const to = (n: number) => clamp(Math.round(n), 0, 255).toString(16).padStart(2, "0");
-  return `#${to(r)}${to(g)}${to(b)}`.toUpperCase();
-}
-
-function rgbToHsl(r: number, g: number, b: number) {
-  r /= 255;
-  g /= 255;
-  b /= 255;
-
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const d = max - min;
-
-  let h = 0;
-  let s = 0;
-  const l = (max + min) / 2;
-
-  if (d !== 0) {
-    s = d / (1 - Math.abs(2 * l - 1));
-    switch (max) {
-      case r:
-        h = ((g - b) / d) % 6;
-        break;
-      case g:
-        h = (b - r) / d + 2;
-        break;
-      case b:
-        h = (r - g) / d + 4;
-        break;
-    }
-    h *= 60;
-    if (h < 0) h += 360;
+function devWarn(...args: any[]) {
+  if (process.env.NODE_ENV !== "production") {
+    // eslint-disable-next-line no-console
+    console.warn(...args);
   }
-
-  return { h, s, l };
 }
 
-function hslToRgb(h: number, s: number, l: number) {
-  h = ((h % 360) + 360) % 360;
-  s = clamp(s, 0, 1);
-  l = clamp(l, 0, 1);
-
-  const c = (1 - Math.abs(2 * l - 1)) * s;
-  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
-  const m = l - c / 2;
-
-  let rp = 0,
-    gp = 0,
-    bp = 0;
-
-  if (h < 60) [rp, gp, bp] = [c, x, 0];
-  else if (h < 120) [rp, gp, bp] = [x, c, 0];
-  else if (h < 180) [rp, gp, bp] = [0, c, x];
-  else if (h < 240) [rp, gp, bp] = [0, x, c];
-  else if (h < 300) [rp, gp, bp] = [x, 0, c];
-  else [rp, gp, bp] = [c, 0, x];
-
-  return {
-    r: (rp + m) * 255,
-    g: (gp + m) * 255,
-    b: (bp + m) * 255,
-  };
+function setVar(root: HTMLElement, key: string, value: string) {
+  root.style.setProperty(key, String(value));
 }
 
-function shiftLightness(hex: string, delta: number) {
-  const rgb = hexToRgb(hex);
-  if (!rgb) return hex;
-  const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
-  const next = hslToRgb(hsl.h, hsl.s, clamp(hsl.l + delta, 0, 1));
-  return rgbToHex(next.r, next.g, next.b);
-}
-
-function shiftSaturation(hex: string, delta: number) {
-  const rgb = hexToRgb(hex);
-  if (!rgb) return hex;
-  const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
-  const next = hslToRgb(hsl.h, clamp(hsl.s + delta, 0, 1), hsl.l);
-  return rgbToHex(next.r, next.g, next.b);
-}
-
-function rgbaFromHex(hex: string, a: number) {
-  const rgb = hexToRgb(hex);
-  if (!rgb) return `rgba(255,255,255,${clamp(a, 0, 1)})`;
-  return `rgba(${rgb.r},${rgb.g},${rgb.b},${clamp(a, 0, 1)})`;
-}
-
-// ---------- Theme builder ----------
-
-export function buildThemeFromBase(baseHex: string, opts?: ThemeBuildOptions): ThemeTokens {
-  const depth = clamp(opts?.depth ?? 0.72, 0, 1);
-  const punch = clamp(opts?.punch ?? 0.70, 0, 1);
-
-  // Gradient: lighter top, base middle, darker bottom
-  const top = shiftLightness(baseHex, 0.12 * depth);
-  const main = baseHex.toUpperCase();
-  const bottom = shiftLightness(baseHex, -0.16 * depth);
-
-  // Make glow a slightly more saturated + slightly lighter version of the base
-  const glowBase = shiftLightness(shiftSaturation(baseHex, 0.10), 0.06);
-
-  // Edge/highlights are neutral whites; we only scale strength with punch
-  const edge = `rgba(255,255,255,${0.14 + 0.06 * punch})`;
-  const innerTop = `rgba(255,255,255,${0.18 + 0.06 * punch})`;
-  const innerBottom = `rgba(0,0,0,${0.16 + 0.06 * depth})`;
-  const sheen = `rgba(255,255,255,${0.18 + 0.08 * punch})`;
-
-  // Glow & ring derived from the glowBase
-  const glow = rgbaFromHex(glowBase, 0.34 + 0.22 * punch);
-  const glowStrong = rgbaFromHex(glowBase, 0.58 + 0.24 * punch);
-  const ring = rgbaFromHex(glowBase, 0.42 + 0.18 * punch);
-  const ringStrong = rgbaFromHex(glowBase, 0.64 + 0.20 * punch);
-
-  return {
-    buttonTop: top,
-    buttonMain: main,
-    buttonBottom: bottom,
-
-    buttonEdge: edge,
-    buttonInnerTop: innerTop,
-    buttonInnerBottom: innerBottom,
-    buttonSheen: sheen,
-
-    buttonGlow: glow,
-    buttonGlowStrong: glowStrong,
-    focusRing: ring,
-    focusRingStrong: ringStrong,
-  };
+function ensureVar(vars: ThemeVars, key: string, fallback: string) {
+  const v = vars[key];
+  if (typeof v !== "string" || v.trim() === "") {
+    vars[key] = fallback;
+  }
 }
 
 /**
- * DEFAULT_THEME is generated from a single base button color.
- * Change BASE_BUTTON_COLOR to re-theme the app.
+ * Minimum variables required to keep Button.tsx + globals.css stable.
+ * If any are missing, we fill them with safe fallbacks to prevent UI regressions.
  */
-export const DEFAULT_THEME: ThemeTokens = buildThemeFromBase(BASE_BUTTON_COLOR);
+function normalizeThemeVars(input: ThemeVars): ThemeVars {
+  const v: ThemeVars = { ...(input || {}) };
 
-/**
- * Maps semantic theme tokens to concrete CSS variables.
- * CSS variable names are stable and consumed by Button styles.
- */
-const CSS_VAR_MAP: Record<keyof ThemeTokens, string> = {
-  buttonTop: "--button-top",
-  buttonMain: "--button-main",
-  buttonBottom: "--button-bottom",
+  // Focus ring (globals.css uses --focus-ring; Button uses --focus-ring-strong)
+  ensureVar(v, "--focus-ring", "rgba(110, 168, 255, 0.55)");
+  ensureVar(v, "--focus-ring-strong", "rgba(110, 168, 255, 0.78)");
 
-  buttonEdge: "--button-edge",
-  buttonInnerTop: "--button-inner-top",
-  buttonInnerBottom: "--button-inner-bottom",
-  buttonSheen: "--button-sheen",
+  // Primary button gradient + edges
+  ensureVar(v, "--button-top", "rgba(90,150,255,1)");
+  ensureVar(v, "--button-main", "rgba(60,120,255,1)");
+  ensureVar(v, "--button-bottom", "rgba(40,95,225,1)");
+  ensureVar(v, "--button-edge", "rgba(255,255,255,0.18)");
 
-  buttonGlow: "--button-glow",
-  buttonGlowStrong: "--button-glow-strong",
-  focusRing: "--focus-ring",
-  focusRingStrong: "--focus-ring-strong",
+  // Inner highlight gradient
+  ensureVar(v, "--button-inner-top", "rgba(255,255,255,0.20)");
+  ensureVar(v, "--button-inner-bottom", "rgba(0,0,0,0.18)");
+
+  // Sheen sweep + glow
+  ensureVar(v, "--button-sheen", "rgba(255,255,255,0.28)");
+  ensureVar(v, "--button-glow", "rgba(90,150,255,0.40)");
+  ensureVar(v, "--button-glow-strong", "rgba(90,150,255,0.65)");
+
+  // Optional app-level vars (safe defaults)
+  ensureVar(v, "--app-bg", "#050812");
+  ensureVar(v, "--app-fg", "rgba(255,255,255,0.92)");
+  ensureVar(v, "--card-bg", "rgba(0,0,0,0.28)");
+  ensureVar(v, "--card-border", "rgba(255,255,255,0.10)");
+
+  return v;
+}
+
+export const DEFAULT_THEME: Theme = {
+  name: "pocketrocks-default",
+  vars: normalizeThemeVars({
+    // Focus ring
+    "--focus-ring": "rgba(110, 168, 255, 0.55)",
+    "--focus-ring-strong": "rgba(110, 168, 255, 0.78)",
+
+    // Primary button
+    "--button-top": "rgba(90,150,255,1)",
+    "--button-main": "rgba(60,120,255,1)",
+    "--button-bottom": "rgba(40,95,225,1)",
+    "--button-edge": "rgba(255,255,255,0.18)",
+
+    "--button-inner-top": "rgba(255,255,255,0.20)",
+    "--button-inner-bottom": "rgba(0,0,0,0.18)",
+
+    "--button-sheen": "rgba(255,255,255,0.28)",
+    "--button-glow": "rgba(90,150,255,0.40)",
+    "--button-glow-strong": "rgba(90,150,255,0.65)",
+
+    // App chrome (optional)
+    "--app-bg": "#050812",
+    "--app-fg": "rgba(255,255,255,0.92)",
+    "--card-bg": "rgba(0,0,0,0.28)",
+    "--card-border": "rgba(255,255,255,0.10)",
+  }),
 };
 
 /**
- * Apply theme tokens by setting CSS variables on :root.
+ * Applies theme CSS variables to :root.
  * Safe to call multiple times.
  */
-export function applyTheme(theme: ThemeTokens) {
+export function applyTheme(theme: Theme) {
   if (typeof document === "undefined") return;
 
-  const root = document.documentElement;
-  (Object.keys(CSS_VAR_MAP) as Array<keyof ThemeTokens>).forEach((key) => {
-    root.style.setProperty(CSS_VAR_MAP[key], theme[key]);
-  });
+  const root = document.documentElement as HTMLElement | null;
+  if (!root) return;
+
+  const effectiveTheme: Theme =
+    theme && theme.vars ? theme : DEFAULT_THEME;
+
+  if (!theme || !theme.vars) {
+    devWarn("[theme] applyTheme called with empty theme. Using DEFAULT_THEME.");
+  }
+
+  const vars = normalizeThemeVars(effectiveTheme.vars);
+
+  // Tag the active theme (debuggable in DevTools)
+  root.dataset.theme = effectiveTheme.name || "theme";
+
+  for (const [k, value] of Object.entries(vars)) {
+    if (!k.startsWith("--")) continue;
+    setVar(root, k, value);
+  }
+}
+
+/**
+ * Helper if you ever want to switch themes later.
+ */
+export function makeTheme(name: string, vars: ThemeVars): Theme {
+  return { name, vars: normalizeThemeVars(vars || {}) };
 }

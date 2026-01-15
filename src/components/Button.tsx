@@ -2,9 +2,11 @@
    FILE: src/components/Button.tsx
 
    SCOPE:
-   SaaS-grade Button component.
-   - Fully role-based CSS variable usage
-   - No color-based assumptions
+   SaaS-grade Button component (CHARTER HARDENED)
+   - Single source of truth for button styling + halo/glow
+   - Disabled state is consistent for BOTH disabled and loading
+   - Disabled buttons do NOT animate on hover (no fake affordance)
+   - Keeps role-based CSS variable usage (themeable)
    ============================================================ */
 
 "use client";
@@ -48,11 +50,22 @@ export function buttonClassName(opts?: {
   const fullWidth = opts?.fullWidth ?? false;
   const disabled = opts?.disabled ?? false;
 
+  // Base always-on styling (NO hover/active here; those get added only if enabled)
   const base =
     "relative inline-flex items-center justify-center gap-2 select-none font-semibold " +
     "transition-[transform,box-shadow,background,border-color,color,filter] duration-150 " +
-    "focus-visible:outline-none overflow-hidden " +
+    "focus-visible:outline-none overflow-hidden";
+
+  // Only apply motion + hover effects when enabled
+  const interactive =
+    "cursor-pointer " +
     "hover:-translate-y-[1px] active:translate-y-[1px] active:scale-[0.99]";
+
+  // Disabled should look and feel disabled
+  const disabledClass =
+    "opacity-60 cursor-not-allowed " +
+    "pointer-events-none " + // prevents hover/active firing in some browsers/styles
+    "transform-none";
 
   const width = fullWidth ? "w-full" : "";
 
@@ -66,21 +79,27 @@ export function buttonClassName(opts?: {
     "after:content-[''] after:absolute after:inset-0 " +
     "after:bg-[linear-gradient(120deg,transparent_0%,var(--button-sheen)_18%,transparent_36%)] " +
     "after:translate-x-[-140%] after:opacity-0 " +
-    "hover:after:opacity-100 hover:after:translate-x-[140%] after:transition-[transform,opacity] after:duration-500 " +
+    "after:transition-[transform,opacity] after:duration-500 " +
+    "hover:after:opacity-100 hover:after:translate-x-[140%] " +
     "hover:shadow-[0_18px_54px_rgba(0,0,0,0.40),0_0_26px_var(--button-glow)] " +
     "focus-visible:shadow-[0_18px_54px_rgba(0,0,0,0.40),0_0_0_3px_var(--focus-ring-strong),0_0_34px_var(--button-glow-strong)]";
 
   const secondary =
-    "text-white/90 bg-white/7 border border-white/12 hover:bg-white/10";
+    "text-white/90 bg-white/7 border border-white/12 hover:bg-white/10 " +
+    "focus-visible:shadow-[0_0_0_3px_var(--focus-ring-strong)]";
 
   const ghost =
-    "text-white/85 bg-transparent hover:bg-white/7";
+    "text-white/85 bg-transparent hover:bg-white/7 " +
+    "focus-visible:shadow-[0_0_0_3px_var(--focus-ring-strong)]";
 
   const danger =
-    "text-white bg-[linear-gradient(180deg,#ff7a6b,#f04e23_55%,#c83b16)]";
+    "text-white bg-[linear-gradient(180deg,#ff7a6b,#f04e23_55%,#c83b16)] " +
+    "hover:shadow-[0_18px_54px_rgba(0,0,0,0.40),0_0_18px_rgba(240,78,35,0.45)] " +
+    "focus-visible:shadow-[0_0_0_3px_var(--focus-ring-strong)]";
 
   const dangerGhost =
-    "text-white/90 bg-white/7 hover:bg-[rgba(240,78,35,0.16)]";
+    "text-white/90 bg-white/7 hover:bg-[rgba(240,78,35,0.16)] " +
+    "focus-visible:shadow-[0_0_0_3px_var(--focus-ring-strong)]";
 
   const variantClass =
     variant === "primary"
@@ -93,7 +112,14 @@ export function buttonClassName(opts?: {
       ? danger
       : dangerGhost;
 
-  return cx(base, sizeClass(size), width, variantClass, disabled && "opacity-60", opts?.className);
+  return cx(
+    base,
+    sizeClass(size),
+    width,
+    variantClass,
+    disabled ? disabledClass : interactive,
+    opts?.className
+  );
 }
 
 export function Button({
@@ -104,12 +130,16 @@ export function Button({
   disabled,
   className,
   children,
+  type,
   ...props
 }: ButtonProps) {
+  const isDisabled = Boolean(disabled || loading);
+
   return (
     <button
-      disabled={disabled || loading}
-      className={buttonClassName({ variant, size, fullWidth, disabled, className })}
+      type={type ?? "button"} // safer default; override when you need submit
+      disabled={isDisabled}
+      className={buttonClassName({ variant, size, fullWidth, disabled: isDisabled, className })}
       {...props}
     >
       <span className="relative z-10">{children}</span>

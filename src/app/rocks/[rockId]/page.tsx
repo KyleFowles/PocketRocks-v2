@@ -1,315 +1,241 @@
-"use client";
-
 /* ============================================================
    FILE: src/app/rocks/[rockId]/page.tsx
 
    SCOPE:
-   Rock Detail page (Draft + Improve) with persistence + AI.
-
-   BUILD FIX (Vercel):
-   - Remove dependency on "@/components/rock/RockModes" which is
-     failing module resolution in Vercel (Linux case-sensitive).
-   - Inline the needed types + helpers:
-       * RockMode
-       * ImproveSuggestion
-       * makeSuggestionId()
-       * normalizeSuggestionText()
-
-   SAVE SIGNATURE:
-   - This project’s saveRock expects 2 args:
-       saveRock(rockId, rock)
-
-   ASSUMES:
-   - getRock(uid, rockId) exists
-   - saveRock(rockId, rock) exists
-   - DraftMode / ImproveMode / CollapsedHeader exist
-   - /api/rock-suggest exists
+   Rock detail page — CHARTER SCRUB (Golden Path)
+   - Pulls rockId from route params safely
+   - Waits for auth uid (and clearly handles "not signed in")
+   - Reads via getRock(uid, rockId)
+   - Normalizes arrays to prevent downstream .map crashes (no mutation)
+   - Passes uid + rockId into RockBuilder
+   - DEV-only logs raw load errors for fast debugging
+   - Prevents setState after unmount (alive guard)
    ============================================================ */
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+"use client";
+
+import React, { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 
-import CollapsedHeader from "@/components/rock/CollapsedHeader";
-import DraftMode from "@/components/rock/DraftMode";
-import ImproveMode from "@/components/rock/ImproveMode";
-
 import { useAuth } from "@/lib/useAuth";
-import { getRock, saveRock } from "@/lib/rocks";
-import type { Rock } from "@/types/rock";
+import { getRock } from "@/lib/rocks";
+import RockBuilder from "@/components/RockBuilder";
 
-/* -----------------------------
-   Inline shared types/helpers
------------------------------- */
+type LoadState = "idle" | "loading" | "ready" | "notfound" | "error";
 
-type RockMode = "draft" | "improve";
-
-export type ImproveSuggestion = {
-  id: string;
-  text: string;
-  recommended?: boolean;
-};
-
-function makeSuggestionId(prefix: string = "s"): string {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const c: any = globalThis as any;
-    if (c?.crypto?.randomUUID) return `${prefix}_${c.crypto.randomUUID()}`;
-  } catch {
-    // ignore
+function devError(...args: any[]) {
+  if (process.env.NODE_ENV !== "production") {
+    // eslint-disable-next-line no-console
+    console.error(...args);
   }
-  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
-function normalizeSuggestionText(input: unknown): string {
-  if (typeof input !== "string") return "";
-  let s = input.trim();
-
-  // remove wrapping quotes
-  if (
-    (s.startsWith('"') && s.endsWith('"')) ||
-    (s.startsWith("'") && s.endsWith("'")) ||
-    (s.startsWith("“") && s.endsWith("”"))
-  ) {
-    s = s.slice(1, -1).trim();
-  }
-
-  // strip common bullets / numbering
-  s = s.replace(/^[-*•]\s+/, "");
-  s = s.replace(/^\d+\.\s+/, "");
-
-  // collapse whitespace
-  s = s.replace(/\s+/g, " ").trim();
-  return s;
+function firstParam(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (Array.isArray(v) && typeof v[0] === "string") return v[0];
+  return "";
 }
 
-/* -----------------------------
-   Suggest API parsing
------------------------------- */
+function normalizeRock(r: any) {
+  if (!r || typeof r !== "object") return r;
 
-type SuggestApiResponse =
-  | { suggestions?: string[] }
-  | { suggestion?: string }
-  | { text?: string }
-  | unknown;
-
-async function fetchSuggestion(text: string): Promise<string> {
-  const res = await fetch("/api/rock-suggest", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
-  });
-  if (!res.ok) throw new Error("suggest_failed");
-
-  const data: SuggestApiResponse = await res.json();
-
-  const first =
-    (Array.isArray((data as any)?.suggestions) ? (data as any).suggestions[0] : null) ??
-    (typeof (data as any)?.suggestion === "string" ? (data as any).suggestion : null) ??
-    (typeof (data as any)?.text === "string" ? (data as any).text : null);
-
-  const cleaned = normalizeSuggestionText(first);
-  if (!cleaned) throw new Error("empty_suggestion");
-  return cleaned;
+  return {
+    ...r,
+    metrics: Array.isArray((r as any).metrics) ? (r as any).metrics : [],
+    milestones: Array.isArray((r as any).milestones) ? (r as any).milestones : [],
+  };
 }
-
-/* -----------------------------
-   Page
------------------------------- */
 
 export default function RockDetailPage() {
-  const params = useParams<{ rockId: string }>();
-  const rockId = params?.rockId;
+  const params = useParams();
+  const rockId = useMemo(() => firstParam((params as any)?.rockId), [params]);
 
-  const { uid, loading } = useAuth();
+  const { uid, loading: authLoading } = useAuth();
 
-  const [rock, setRock] = useState<Rock | null>(null);
+  const [loadState, setLoadState] = useState<LoadState>("idle");
+  const [rock, setRock] = useState<any>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
-  const [mode, setMode] = useState<RockMode>("draft");
+  const missingRockId = !rockId;
+  const notSignedIn = !authLoading && !uid;
 
-  const [saving, setSaving] = useState(false);
-  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
-
-  const [suggestion, setSuggestion] = useState<ImproveSuggestion | null>(null);
-  const [loadingSuggestion, setLoadingSuggestion] = useState(false);
-  const [suggestionError, setSuggestionError] = useState<string | null>(null);
-
-  // serialize saves
-  const inflightSaveRef = useRef<Promise<void> | null>(null);
-
-  const title = (rock as any)?.title ?? "";
-  const statement = (rock as any)?.statement ?? (rock as any)?.finalStatement ?? "";
+  // Reset state whenever the target rock changes (prevents stale UI)
+  useEffect(() => {
+    setRock(null);
+    setLoadErr(null);
+    setLoadState("idle");
+  }, [rockId]);
 
   useEffect(() => {
-    if (!uid || !rockId) return;
+    let alive = true;
 
-    let cancelled = false;
+    async function run() {
+      setLoadErr(null);
 
-    (async () => {
-      try {
-        setLoadErr(null);
-        const r = await getRock(uid, rockId);
-        if (cancelled) return;
-        setRock(r);
-      } catch {
-        if (cancelled) return;
-        setLoadErr("Could not load this Rock.");
+      if (!rockId) {
+        setLoadState("error");
+        setLoadErr("Missing rockId in the URL.");
+        return;
       }
-    })();
+
+      if (!uid) {
+        // Auth finished but no uid: UI will show sign-in required.
+        return;
+      }
+
+      try {
+        setLoadState("loading");
+
+        const r = await getRock(uid, rockId);
+        if (!alive) return;
+
+        if (!r) {
+          setRock(null);
+          setLoadState("notfound");
+          return;
+        }
+
+        setRock(normalizeRock(r));
+        setLoadState("ready");
+      } catch (e: any) {
+        if (!alive) return;
+
+        devError("[RockDetailPage] getRock failed:", e);
+
+        setRock(null);
+        setLoadState("error");
+        setLoadErr(typeof e?.message === "string" ? e.message : "Failed to load rock.");
+      }
+    }
+
+    // Only fetch when auth is finished and we have both uid + rockId
+    if (!authLoading && uid && rockId) {
+      run();
+    }
 
     return () => {
-      cancelled = true;
+      alive = false;
     };
-  }, [uid, rockId]);
+  }, [authLoading, uid, rockId]);
 
-  async function saveNow(nextRock?: Rock): Promise<void> {
-    if (!rockId) return;
-    const toSave = nextRock ?? rock;
-    if (!toSave) return;
+  // ---- UI states ----
 
-    // serialize
-    if (inflightSaveRef.current) await inflightSaveRef.current;
-
-    setSaving(true);
-    const p = (async () => {
-      try {
-        await saveRock(rockId, toSave);
-        setLastSavedAt(Date.now());
-      } finally {
-        setSaving(false);
-      }
-    })();
-
-    inflightSaveRef.current = p;
-    await p;
-    inflightSaveRef.current = null;
-  }
-
-  async function enterImprove() {
-    setMode("improve");
-
-    const txt = statement?.trim();
-    if (!txt) {
-      setSuggestion(null);
-      setSuggestionError("Write a draft first.");
-      return;
-    }
-
-    setLoadingSuggestion(true);
-    setSuggestionError(null);
-
-    try {
-      const s = await fetchSuggestion(txt);
-      setSuggestion({ id: makeSuggestionId("rec"), text: s, recommended: true });
-    } catch {
-      setSuggestion(null);
-      setSuggestionError("Could not generate a suggestion.");
-    } finally {
-      setLoadingSuggestion(false);
-    }
-  }
-
-  async function requestAnother() {
-    const txt = statement?.trim();
-    if (!txt) return;
-
-    setLoadingSuggestion(true);
-    setSuggestionError(null);
-
-    try {
-      const s = await fetchSuggestion(txt);
-      setSuggestion({ id: makeSuggestionId("s"), text: s });
-    } catch {
-      setSuggestionError("Could not generate a suggestion.");
-    } finally {
-      setLoadingSuggestion(false);
-    }
-  }
-
-  async function applySuggestion(nextText: string) {
-    if (!rock) return;
-
-    const nextRock: any = { ...rock };
-
-    if (Object.prototype.hasOwnProperty.call(nextRock, "statement")) {
-      nextRock.statement = nextText;
-    } else {
-      nextRock.finalStatement = nextText;
-    }
-
-    nextRock.updatedAt = Date.now();
-    setRock(nextRock as Rock);
-
-    await saveNow(nextRock as Rock);
-  }
-
-  if (loading) {
-    return <div className="min-h-[60vh] flex items-center justify-center text-white/70">Loading…</div>;
-  }
-
-  if (!uid) {
+  if (authLoading || loadState === "loading") {
     return (
-      <div className="min-h-[60vh] flex items-center justify-center px-6">
-        <div className="max-w-md w-full rounded-2xl border border-white/10 bg-white/5 p-5">
-          <div className="text-white font-semibold mb-2">Please sign in</div>
-          <div className="text-white/70 text-sm">You need an account to view Rocks.</div>
+      <div style={shell}>
+        <div style={brand}>PocketRocks</div>
+        <div style={muted}>Loading…</div>
+      </div>
+    );
+  }
+
+  if (missingRockId) {
+    return (
+      <div style={shell}>
+        <div style={brand}>PocketRocks</div>
+        <div style={muted}>Rock</div>
+
+        <div style={alert}>
+          <div style={alertTitle}>Heads up</div>
+          <div style={alertBody}>Missing rockId in the URL.</div>
         </div>
       </div>
     );
   }
 
-  if (loadErr) {
+  if (notSignedIn) {
     return (
-      <div className="min-h-[60vh] flex items-center justify-center px-6">
-        <div className="max-w-md w-full rounded-2xl border border-white/10 bg-white/5 p-5">
-          <div className="text-white font-semibold mb-2">Error</div>
-          <div className="text-white/70 text-sm">{loadErr}</div>
+      <div style={shell}>
+        <div style={brand}>PocketRocks</div>
+        <div style={muted}>Rock</div>
+
+        <div style={alertWarn}>
+          <div style={alertTitle}>Sign in required</div>
+          <div style={alertBody}>Please sign in to view this Rock.</div>
         </div>
       </div>
     );
   }
 
-  if (!rock) {
-    return <div className="min-h-[60vh] flex items-center justify-center text-white/70">Loading Rock…</div>;
+  if (loadState === "error") {
+    return (
+      <div style={shell}>
+        <div style={brand}>PocketRocks</div>
+        <div style={muted}>Rock</div>
+
+        <div style={alert}>
+          <div style={alertTitle}>Heads up</div>
+          <div style={alertBody}>{loadErr || "Failed to load rock."}</div>
+        </div>
+      </div>
+    );
   }
 
-  return (
-    <div className="w-full">
-      <CollapsedHeader
-        titleLeft="Rock"
-        titleRight={mode === "draft" ? "Draft" : "Improve"}
-        rightSlot={lastSavedAt ? <span className="text-white/55">Saved</span> : null}
-      />
+  if (loadState === "notfound" || !rock) {
+    return (
+      <div style={shell}>
+        <div style={brand}>PocketRocks</div>
+        <div style={muted}>Rock</div>
 
-      {mode === "draft" ? (
-        <DraftMode
-          draft={statement}
-          title={title}
-          saving={saving}
-          lastSavedAt={lastSavedAt}
-          onChangeDraft={(next) => {
-            setRock((prev: any) => {
-              if (!prev) return prev;
-              const hasStatement = Object.prototype.hasOwnProperty.call(prev, "statement");
-              return hasStatement ? { ...prev, statement: next } : { ...prev, finalStatement: next };
-            });
-          }}
-          onChangeTitle={(next) => setRock((prev: any) => (prev ? { ...prev, title: next } : prev))}
-          onSaveNow={async () => saveNow()}
-          onContinue={enterImprove}
-        />
-      ) : (
-        <ImproveMode
-          draftText={statement}
-          rockTitle={title}
-          suggestion={suggestion as any}
-          loadingSuggestion={loadingSuggestion}
-          suggestionError={suggestionError}
-          onRequestAnother={requestAnother}
-          onApplySuggestion={applySuggestion}
-          onBackToDraft={() => setMode("draft")}
-        />
-      )}
-    </div>
-  );
+        <div style={alert}>
+          <div style={alertTitle}>Heads up</div>
+          <div style={alertBody}>Rock not found.</div>
+        </div>
+      </div>
+    );
+  }
+
+  return <RockBuilder uid={uid!} rockId={rockId} initialRock={rock} />;
 }
+
+/* -----------------------------
+   Minimal page styling
+------------------------------ */
+
+const shell: React.CSSProperties = {
+  minHeight: "100vh",
+  padding: "28px 22px",
+  background:
+    "radial-gradient(1000px 520px at 20% 20%, rgba(60,130,255,0.20), transparent 60%), radial-gradient(900px 480px at 70% 30%, rgba(255,120,0,0.12), transparent 60%), #050812",
+  color: "rgba(255,255,255,0.92)",
+};
+
+const brand: React.CSSProperties = {
+  fontSize: 44,
+  fontWeight: 900,
+  letterSpacing: -0.5,
+};
+
+const muted: React.CSSProperties = {
+  marginTop: 6,
+  opacity: 0.65,
+};
+
+const alert: React.CSSProperties = {
+  marginTop: 22,
+  maxWidth: 980,
+  padding: 18,
+  borderRadius: 18,
+  border: "1px solid rgba(255,80,80,0.35)",
+  background: "rgba(255,80,80,0.10)",
+};
+
+const alertWarn: React.CSSProperties = {
+  marginTop: 22,
+  maxWidth: 980,
+  padding: 18,
+  borderRadius: 18,
+  border: "1px solid rgba(255,200,80,0.35)",
+  background: "rgba(255,200,80,0.10)",
+};
+
+const alertTitle: React.CSSProperties = {
+  fontSize: 22,
+  fontWeight: 800,
+  marginBottom: 6,
+};
+
+const alertBody: React.CSSProperties = {
+  fontSize: 16,
+  opacity: 0.9,
+};

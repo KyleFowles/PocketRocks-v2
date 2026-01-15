@@ -1,74 +1,116 @@
-// FILE: src/lib/firebase.ts
-// SCOPE:
-// - Firebase client initialization (Auth + Firestore)
-// - Next.js-safe (client-only), avoids throwing hard errors in the browser bundle
-// - Prevents "Missing Firebase env var" false negatives during dev/prod
+/* ============================================================
+   FILE: src/lib/firebase.ts
 
-import { initializeApp, getApp, getApps, type FirebaseApp } from "firebase/app";
+   SCOPE:
+   Firebase client initialization (CHARTER HARDENED)
+   - Reads NEXT_PUBLIC_* config
+   - Never throws during import
+   - Exposes clear diagnostics via getFirebaseConfigStatus()
+   - Backward compatible exports:
+       - isFirebaseConfigured()
+       - getAuthClient()  (returns Auth OR throws clear error)
+   - Exports: app, auth, db
+   ============================================================ */
+
+import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
 import { getFirestore, type Firestore } from "firebase/firestore";
 
-type FirebaseClient = {
-  app: FirebaseApp;
-  auth: Auth;
-  db: Firestore;
+type FirebaseConfig = {
+  apiKey: string;
+  authDomain: string;
+  projectId: string;
+  storageBucket: string;
+  messagingSenderId: string;
+  appId: string;
 };
 
-let cached: FirebaseClient | null = null;
+function s(v: unknown) {
+  return typeof v === "string" ? v.trim() : "";
+}
 
-function readFirebaseEnv() {
-  // Next.js will inline NEXT_PUBLIC_* at build time.
-  // In the browser, process.env is not a real runtime object, so we must
-  // treat missing values gracefully and not throw during render.
-  const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "";
-  const authDomain = process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "";
-  const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "";
-  const storageBucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "";
-  const messagingSenderId = process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "";
-  const appId = process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "";
+function readConfig(): FirebaseConfig {
+  return {
+    apiKey: s(process.env.NEXT_PUBLIC_FIREBASE_API_KEY),
+    authDomain: s(process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN),
+    projectId: s(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID),
+    storageBucket: s(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET),
+    messagingSenderId: s(process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID),
+    appId: s(process.env.NEXT_PUBLIC_FIREBASE_APP_ID),
+  };
+}
 
+/**
+ * Public diagnostic helper.
+ */
+export function getFirebaseConfigStatus() {
+  const cfg = readConfig();
   const missing: string[] = [];
-  if (!apiKey) missing.push("NEXT_PUBLIC_FIREBASE_API_KEY");
-  if (!authDomain) missing.push("NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN");
-  if (!projectId) missing.push("NEXT_PUBLIC_FIREBASE_PROJECT_ID");
-  if (!storageBucket) missing.push("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET");
-  if (!messagingSenderId) missing.push("NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID");
-  if (!appId) missing.push("NEXT_PUBLIC_FIREBASE_APP_ID");
+
+  if (!cfg.apiKey) missing.push("NEXT_PUBLIC_FIREBASE_API_KEY");
+  if (!cfg.authDomain) missing.push("NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN");
+  if (!cfg.projectId) missing.push("NEXT_PUBLIC_FIREBASE_PROJECT_ID");
+  if (!cfg.storageBucket) missing.push("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET");
+  if (!cfg.messagingSenderId) missing.push("NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID");
+  if (!cfg.appId) missing.push("NEXT_PUBLIC_FIREBASE_APP_ID");
 
   return {
     ok: missing.length === 0,
     missing,
-    config: { apiKey, authDomain, projectId, storageBucket, messagingSenderId, appId },
+    preview: {
+      apiKey: cfg.apiKey ? `${cfg.apiKey.slice(0, 6)}…` : "",
+      authDomain: cfg.authDomain ? `${cfg.authDomain.slice(0, 6)}…` : "",
+      projectId: cfg.projectId ? `${cfg.projectId.slice(0, 6)}…` : "",
+    },
   };
 }
 
-export function getFirebaseClient(): FirebaseClient {
-  if (cached) return cached;
-
-  // This module must only be used in the browser.
-  if (typeof window === "undefined") {
-    throw new Error("getFirebaseClient() was called on the server. Use it in client components only.");
-  }
-
-  const env = readFirebaseEnv();
-  if (!env.ok) {
-    // Do NOT throw (it breaks the whole app). Provide a clear error.
-    // This will surface as a normal runtime error only when Firebase is actually used.
-    throw new Error(`Firebase env missing: ${env.missing.join(", ")}`);
-  }
-
-  const app = getApps().length ? getApp() : initializeApp(env.config);
-  const auth = getAuth(app);
-  const db = getFirestore(app);
-
-  cached = { app, auth, db };
-  return cached;
+/**
+ * BACKCOMPAT: providers.tsx expects a NAMED export `isFirebaseConfigured`
+ */
+export function isFirebaseConfigured(): boolean {
+  return getFirebaseConfigStatus().ok;
 }
 
-export function getAuthClient() {
-  return getFirebaseClient().auth;
+/**
+ * Initialize Firebase app safely.
+ */
+function initFirebase(): FirebaseApp | null {
+  if (!isFirebaseConfigured()) return null;
+
+  const config = readConfig();
+  try {
+    return getApps().length ? getApp() : initializeApp(config);
+  } catch {
+    return null;
+  }
 }
 
-export function getDbClient() {
-  return getFirebaseClient().db;
+export const app: FirebaseApp | null = initFirebase();
+
+/**
+ * Auth + Firestore instances (or null if not configured).
+ */
+export const auth: Auth | null = app ? getAuth(app) : null;
+export const db: Firestore | null = app ? getFirestore(app) : null;
+
+/**
+ * BACKCOMPAT: providers.tsx expects a NAMED export `getAuthClient`
+ *
+ * Charter behavior:
+ * - If Firebase isn’t configured, throw a clear error
+ * - If app/auth failed to init, throw a clear error
+ * - Callers can catch and handle gracefully
+ */
+export function getAuthClient(): Auth {
+  if (!isFirebaseConfigured()) {
+    throw new Error("config: Firebase env missing (NEXT_PUBLIC_FIREBASE_*).");
+  }
+  if (!app) {
+    throw new Error("init: Firebase app failed to initialize.");
+  }
+  if (!auth) {
+    throw new Error("init: Firebase auth failed to initialize.");
+  }
+  return auth;
 }

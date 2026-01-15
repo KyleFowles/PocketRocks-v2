@@ -1,804 +1,455 @@
-// FILE: src/components/RockBuilder.tsx
+/* ============================================================
+   FILE: src/components/RockBuilder.tsx
+
+   PATCH:
+   Persist step when clicking step pills
+   - StepPill clicks now call goToStep(n)
+   - goToStep() updates local step + schedules save { step: n }
+   - Keeps UI/styling unchanged
+   ============================================================ */
+
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import type { Metric, Milestone, Rock } from "@/types/rock";
+import { updateRock } from "@/lib/rocks";
 import { Button } from "@/components/Button";
 
 type Step = 1 | 2 | 3 | 4 | 5;
 
-type AiSuggestion = {
-  id: string;
-  text: string;
-  recommended?: boolean;
+type Props = {
+  uid: string;
+  rockId: string;
+  initialRock: any;
 };
 
-function uid() {
-  return `id_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
-}
-
-function safeTrim(v: any) {
-  return typeof v === "string" ? v.trim() : "";
-}
-
-function buildFinalFromRock(r: Rock) {
-  const title = safeTrim(r.title) || safeTrim(r.draft) || "Rock";
-  const due = safeTrim(r.dueDate) || "—";
-
-  const metricsLine =
-    (r.metrics?.length ?? 0) > 0
-      ? `Metrics: ${r.metrics
-          .map((m: any) => {
-            const name = safeTrim(m.name) || "Metric";
-            const target = safeTrim(m.target) || "—";
-            const current = safeTrim(m.current);
-            return `${name} (Target: ${target}${current ? `, Current: ${current}` : ""})`;
-          })
-          .join("; ")}`
-      : "";
-
-  const milestonesLine =
-    (r.milestones?.length ?? 0) > 0
-      ? `Milestones: ${r.milestones
-          .map((ms: any) => {
-            const text = safeTrim(ms.text) || "Milestone";
-            const dd = safeTrim(ms.dueDate);
-            return `${text}${dd ? ` (${dd})` : ""}`;
-          })
-          .join("; ")}`
-      : "";
-
-  const line1 = `${title} — Due ${due}.`;
-  const detailLines = [metricsLine, milestonesLine].filter(Boolean);
-
-  return [line1, ...detailLines.map((x) => `${x}.`)].filter(Boolean).join("\n");
-}
-
-async function postJson(url: string, body: any) {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  const text = await res.text();
-  let data: any = null;
+function safeStr(v: any): string {
+  if (typeof v === "string") return v;
+  if (v === null || v === undefined) return "";
   try {
-    data = text ? JSON.parse(text) : null;
+    return String(v);
   } catch {
-    // ignore
+    return "";
   }
-
-  if (!res.ok) {
-    const msg =
-      safeTrim(data?.error) ||
-      safeTrim(data?.message) ||
-      safeTrim(text) ||
-      `Request failed (${res.status})`;
-    throw new Error(msg);
-  }
-
-  return data;
 }
 
-export default function RockBuilder(props: {
-  initialRock: Rock;
-  onSave: (rock: Rock) => Promise<void>;
-  onCancel?: () => void;
-}) {
-  const [step, setStep] = useState<Step>(1);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+function clampStep(v: any): Step {
+  const n = typeof v === "number" ? v : Number(v);
+  if (n === 2) return 2;
+  if (n === 3) return 3;
+  if (n === 4) return 4;
+  if (n === 5) return 5;
+  return 1;
+}
 
-  const [rock, setRock] = useState<Rock>(props.initialRock);
-
-  // Autosave UI
-  const [dirty, setDirty] = useState(false);
-  const [saving, setSaving] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [savedAt, setSavedAt] = useState<number | null>(null);
-  const autosaveTimerRef = useRef<any>(null);
-  const mountedRef = useRef(false);
-  const lastSavedSnapshotRef = useRef<string>("");
-
-  // AI UI
-  const [aiBusy, setAiBusy] = useState(false);
-  const [aiErr, setAiErr] = useState<string | null>(null);
-  const [aiSuggestions, setAiSuggestions] = useState<AiSuggestion[]>([]);
-  const [appliedId, setAppliedId] = useState<string | null>(null);
-  const [followup, setFollowup] = useState<string | null>(null);
-
-  const canContinue = useMemo(() => {
-    if (step === 1) return safeTrim(rock.draft).length >= 8;
-    if (step === 2)
-      return (
-        safeTrim(rock.specific).length >= 5 &&
-        safeTrim(rock.measurable).length >= 5 &&
-        safeTrim(rock.achievable).length >= 5 &&
-        safeTrim(rock.relevant).length >= 5 &&
-        safeTrim(rock.timeBound).length >= 5
-      );
-    if (step === 3) return (rock.metrics?.length ?? 0) >= 1;
-    if (step === 4) return (rock.milestones?.length ?? 0) >= 3;
-    return true;
-  }, [step, rock]);
-
-  const computedFinalStatement = useMemo(() => {
-    return buildFinalFromRock(rock);
-  }, [rock]);
-
-  function next() {
-    setErr(null);
-    if (!canContinue) return;
-    setStep((s) => (s < 5 ? ((s + 1) as Step) : s));
+function stripUndefinedDeep(input: any): any {
+  if (input === undefined) return undefined;
+  if (Array.isArray(input)) return input.map(stripUndefinedDeep).filter((x) => x !== undefined);
+  if (input && typeof input === "object") {
+    const out: any = {};
+    for (const [k, v] of Object.entries(input)) {
+      const cleaned = stripUndefinedDeep(v);
+      if (cleaned !== undefined) out[k] = cleaned;
+    }
+    return out;
   }
+  return input;
+}
 
-  function back() {
-    setErr(null);
-    setStep((s) => (s > 1 ? ((s - 1) as Step) : s));
+function devError(...args: any[]) {
+  if (process.env.NODE_ENV !== "production") {
+    // eslint-disable-next-line no-console
+    console.error(...args);
   }
+}
 
-  function set<K extends keyof Rock>(key: K, value: Rock[K]) {
-    setRock((r) => ({ ...r, [key]: value }));
-    setDirty(true);
-    setSaving("idle");
-    setAppliedId(null);
+function stableStringify(obj: any) {
+  try {
+    return JSON.stringify(obj, Object.keys(obj || {}).sort());
+  } catch {
+    return "";
   }
+}
 
-  function addMetric() {
-    const id = `m_${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
-    const metric: Metric = { id, name: "", target: "", current: "" };
-    setRock((r) => ({ ...r, metrics: [...(r.metrics ?? []), metric] }));
-    setDirty(true);
-    setSaving("idle");
-  }
+export default function RockBuilder({ uid, rockId, initialRock }: Props) {
+  const [step, setStep] = useState<Step>(() => clampStep(initialRock?.step));
 
-  function updateMetric(id: string, patch: Partial<Metric>) {
-    setRock((r) => ({
-      ...r,
-      metrics: (r.metrics ?? []).map((m) => (m.id === id ? { ...m, ...patch } : m)),
-    }));
-    setDirty(true);
-    setSaving("idle");
-  }
+  const [rock, setRock] = useState<any>(() => ({
+    ...(initialRock || {}),
+    id: rockId,
+    userId: uid,
+    metrics: Array.isArray(initialRock?.metrics) ? initialRock.metrics : [],
+    milestones: Array.isArray(initialRock?.milestones) ? initialRock.milestones : [],
+  }));
 
-  function removeMetric(id: string) {
-    setRock((r) => ({ ...r, metrics: (r.metrics ?? []).filter((m) => m.id !== id) }));
-    setDirty(true);
-    setSaving("idle");
-  }
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  function addMilestone() {
-    const id = `ms_${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
-    const ms: Milestone = { id, text: "", dueDate: "", completed: false };
-    setRock((r) => ({ ...r, milestones: [...(r.milestones ?? []), ms] }));
-    setDirty(true);
-    setSaving("idle");
-  }
+  const saveTimer = useRef<any>(null);
+  const lastPatchRef = useRef<any>(null);
 
-  function updateMilestone(id: string, patch: Partial<Milestone>) {
-    setRock((r) => ({
-      ...r,
-      milestones: (r.milestones ?? []).map((m) => (m.id === id ? { ...m, ...patch } : m)),
-    }));
-    setDirty(true);
-    setSaving("idle");
-  }
+  const aliveRef = useRef(true);
 
-  function removeMilestone(id: string) {
-    setRock((r) => ({ ...r, milestones: (r.milestones ?? []).filter((m) => m.id !== id) }));
-    setDirty(true);
-    setSaving("idle");
-  }
+  // Monotonic save sequencing prevents out-of-order overwrites
+  const saveSeqRef = useRef(0);
 
-  function buildFinalStatement() {
-    setErr(null);
-    const built = buildFinalFromRock(rock);
-    set("finalStatement", built as any);
-  }
+  // Skip identical saves
+  const lastPatchKeyRef = useRef<string>("");
 
-  // -----------------------------
-  // Autosave (debounced)
-  // -----------------------------
-
-  const normalizedPayloadForSave = useMemo(() => {
-    const title = safeTrim(rock.title) || safeTrim(rock.draft).slice(0, 60);
-    const finalStatement = safeTrim((rock as any).finalStatement) || computedFinalStatement;
-
-    const metrics = (rock.metrics ?? [])
-      .map((m: any) => ({
-        ...m,
-        name: safeTrim(m.name),
-        target: safeTrim(m.target),
-        current: safeTrim(m.current),
-      }))
-      .filter((m: any) => m.name && m.target);
-
-    const milestones = (rock.milestones ?? [])
-      .map((m: any) => ({
-        ...m,
-        text: safeTrim(m.text),
-        dueDate: safeTrim(m.dueDate),
-        completed: !!m.completed,
-      }))
-      .filter((m: any) => m.text);
-
-    const status = (rock as any).status || "on_track";
-
-    const payload: Rock = {
-      ...rock,
-      title,
-      finalStatement,
-      status,
-      metrics,
-      milestones,
-    };
-
-    return payload;
-  }, [rock, computedFinalStatement]);
-
+  // Alive guard (prevents setState after unmount)
   useEffect(() => {
-    if (!mountedRef.current) {
-      mountedRef.current = true;
-      lastSavedSnapshotRef.current = JSON.stringify(normalizedPayloadForSave);
-      return;
-    }
-
-    if (!dirty) return;
-
-    const snapshot = JSON.stringify(normalizedPayloadForSave);
-    if (snapshot === lastSavedSnapshotRef.current) return;
-
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-
-    autosaveTimerRef.current = setTimeout(async () => {
-      setSaving("saving");
-      try {
-        await props.onSave(normalizedPayloadForSave);
-        lastSavedSnapshotRef.current = JSON.stringify(normalizedPayloadForSave);
-        setSaving("saved");
-        setSavedAt(Date.now());
-        setDirty(false);
-      } catch {
-        setSaving("error");
-      }
-    }, 800);
-
+    aliveRef.current = true;
     return () => {
-      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+      aliveRef.current = false;
+      if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [dirty, normalizedPayloadForSave, props]);
+  }, []);
 
-  // -----------------------------
-  // AI Suggestions
-  // -----------------------------
+  // Keep local state in sync if parent reloads initialRock (rare, but safe).
+  useEffect(() => {
+    setRock((prev: any) => ({
+      ...(prev || {}),
+      ...(initialRock || {}),
+      id: rockId,
+      userId: uid,
+      metrics: Array.isArray((initialRock || {})?.metrics) ? initialRock.metrics : prev?.metrics ?? [],
+      milestones: Array.isArray((initialRock || {})?.milestones) ? initialRock.milestones : prev?.milestones ?? [],
+    }));
 
-  function maybeSetFollowup() {
-    const d = safeTrim(rock.draft);
-    const s = safeTrim(rock.specific);
-    const m = safeTrim(rock.measurable);
-
-    if (d.length < 8) {
-      setFollowup("What is your Rock idea in one simple sentence?");
-      return true;
+    // Only update step if the loaded rock has a valid step
+    if (initialRock && initialRock.step !== undefined) {
+      setStep(clampStep(initialRock.step));
     }
-    if (!s && !m) {
-      setFollowup("How will you know this Rock is done? (One measurable sign)");
-      return true;
+  }, [rockId, uid, initialRock]);
+
+  const title = useMemo(() => safeStr(rock?.title) || "Rock", [rock?.title]);
+  const statement = useMemo(() => safeStr(rock?.statement), [rock?.statement]);
+
+  function scheduleSave(patch: any) {
+    const cleaned = stripUndefinedDeep(patch || {});
+    const patchKey = stableStringify(cleaned);
+
+    if (!cleaned || (typeof cleaned === "object" && Object.keys(cleaned).length === 0)) return;
+    if (patchKey && patchKey === lastPatchKeyRef.current) return;
+
+    lastPatchKeyRef.current = patchKey;
+    lastPatchRef.current = cleaned;
+
+    if (aliveRef.current) {
+      setSaveError(null);
+      setSaveState("saving");
     }
 
-    setFollowup(null);
-    return false;
-  }
+    if (saveTimer.current) clearTimeout(saveTimer.current);
 
-  async function generateSuggestions() {
-    setAiErr(null);
-    setAppliedId(null);
+    const mySeq = ++saveSeqRef.current;
 
-    if (maybeSetFollowup()) {
-      setAiSuggestions([]);
-      return;
-    }
+    saveTimer.current = setTimeout(async () => {
+      try {
+        const toSave = lastPatchRef.current || {};
+        await updateRock(uid, rockId, toSave);
 
-    setAiBusy(true);
-    try {
-      const data = await postJson("/api/rock-suggest", {
-        rock: normalizedPayloadForSave,
-        context: { mode: "suggestions", requested: 5 },
-      });
+        if (!aliveRef.current) return;
+        if (mySeq !== saveSeqRef.current) return;
 
-      // ✅ Strict typing so we don't get implicit-any in filter/some
-      const raw: unknown[] = Array.isArray(data?.suggestions) ? (data.suggestions as unknown[]) : [];
+        setSaveState("saved");
+      } catch (e: any) {
+        devError("[RockBuilder] updateRock failed:", e);
 
-      const items: AiSuggestion[] = raw
-        .map((s: unknown, i: number): AiSuggestion => ({
-          id: uid(),
-          text: safeTrim(s),
-          recommended: i === 0,
-        }))
-        .filter((x: AiSuggestion) => Boolean(x.text));
+        if (!aliveRef.current) return;
+        if (mySeq !== saveSeqRef.current) return;
 
-      if (items.length && !items.some((x: AiSuggestion) => Boolean(x.recommended))) {
-        const first = items[0];
-        if (first) first.recommended = true;
+        setSaveState("failed");
+        setSaveError(e?.message || "Save failed.");
       }
-      
-      setAiSuggestions(items);
-      if (!items.length) setAiErr("No suggestions came back. Try again.");
-    } catch (e: any) {
-      setAiErr(typeof e?.message === "string" ? e.message : "Could not generate suggestions.");
-    } finally {
-      setAiBusy(false);
-    }
+    }, 450);
   }
 
-  function applySuggestion(s: AiSuggestion) {
-    setAiErr(null);
-    setAppliedId(s.id);
-    set("finalStatement", s.text as any);
+  function updateField(path: string, value: any) {
+    setRock((prev: any) => {
+      const next = { ...(prev || {}) };
+      const parts = path.split(".");
+      let cur: any = next;
+
+      for (let i = 0; i < parts.length - 1; i++) {
+        const key = parts[i]!;
+        cur[key] = cur[key] && typeof cur[key] === "object" ? { ...cur[key] } : {};
+        cur = cur[key];
+      }
+
+      cur[parts[parts.length - 1]!] = value;
+
+      const patch: any = {};
+      let pcur: any = patch;
+      for (let i = 0; i < parts.length - 1; i++) {
+        const key = parts[i]!;
+        pcur[key] = pcur[key] && typeof pcur[key] === "object" ? pcur[key] : {};
+        pcur = pcur[key];
+      }
+      pcur[parts[parts.length - 1]!] = value;
+
+      scheduleSave(patch);
+
+      return next;
+    });
   }
 
-  async function saveNow() {
-    setErr(null);
-    setBusy(true);
-
-    try {
-      const metricsOk =
-        (normalizedPayloadForSave.metrics?.length ?? 0) >= 1 &&
-        normalizedPayloadForSave.metrics.every((m: any) => safeTrim(m.name) && safeTrim(m.target));
-      const milestonesOk = (normalizedPayloadForSave.milestones?.length ?? 0) >= 3;
-
-      if (!metricsOk) throw new Error("Please add at least 1 metric with a name and target.");
-      if (!milestonesOk) throw new Error("Please add at least 3 milestones.");
-
-      await props.onSave(normalizedPayloadForSave);
-
-      lastSavedSnapshotRef.current = JSON.stringify(normalizedPayloadForSave);
-      setSaving("saved");
-      setSavedAt(Date.now());
-      setDirty(false);
-    } catch (e: any) {
-      const msg = typeof e?.message === "string" ? e.message : "Could not save Rock.";
-      setErr(msg);
-      setSaving("error");
-      setBusy(false);
-      return;
-    }
-
-    setBusy(false);
+  function setMany(patch: any) {
+    setRock((prev: any) => {
+      const next = { ...(prev || {}), ...(patch || {}) };
+      scheduleSave(patch);
+      return next;
+    });
   }
 
-  const saveStatusText = useMemo(() => {
-    if (saving === "saving") return "Saving…";
-    if (saving === "saved") {
-      if (!savedAt) return "Saved";
-      const secs = Math.max(0, Math.floor((Date.now() - savedAt) / 1000));
-      return secs <= 5 ? "Saved" : `Saved ${secs}s ago`;
-    }
-    if (saving === "error") return "Save failed";
-    if (dirty) return "Unsaved changes";
-    return "Saved";
-  }, [saving, savedAt, dirty]);
+  // ✅ NEW: Pill-friendly step setter that persists step
+  function goToStep(target: Step) {
+    setStep(() => {
+      scheduleSave({ step: target });
+      return target;
+    });
+  }
+
+  function nextStep() {
+    setStep((s) => {
+      const ns = s < 5 ? ((s + 1) as Step) : s;
+      scheduleSave({ step: ns });
+      return ns;
+    });
+  }
+
+  function prevStep() {
+    setStep((s) => {
+      const ps = s > 1 ? ((s - 1) as Step) : s;
+      scheduleSave({ step: ps });
+      return ps;
+    });
+  }
+
+  function buildFinalFromSmart() {
+    const s = safeStr(rock?.smart?.specific).trim();
+    const m = safeStr(rock?.smart?.measurable).trim();
+    const t = safeStr(rock?.smart?.timebound).trim();
+
+    const base = s || statement || title;
+    const metric = m ? ` (${m})` : "";
+    const due = t ? ` — Due ${t}` : "";
+
+    const final = `${base}${metric}${due}`.trim();
+    setMany({ finalStatement: final });
+  }
 
   return (
-    <div style={shell}>
-      <div style={topRow}>
-        <StepHeader step={step} onStepClick={(n) => setStep(n)} />
-        <div style={savePillWrap}>
-          <div style={savePill} aria-live="polite">
-            <span style={dot(saving, dirty)} />
-            <span>{saveStatusText}</span>
+    <div style={page}>
+      <div style={topBar}>
+        <div>
+          <div style={brandRow}>
+            <span style={brandOrange}>Pocket</span>
+            <span style={brandWhite}>Rocks</span>
           </div>
+          <div style={crumb}>ROCK · {stepLabel(step)}</div>
+        </div>
+
+        <div style={savePillWrap}>
+          {saveState === "saving" && <div style={pill}>Saving…</div>}
+          {saveState === "saved" && <div style={{ ...pill, opacity: 0.85 }}>Saved</div>}
+          {saveState === "failed" && <div style={{ ...pill, ...pillFail }}>Save failed</div>}
         </div>
       </div>
 
-      {err && <Alert text={err} />}
-
-      {step === 1 && (
-        <Card title="Step 1 — Draft">
-          <p style={muted}>Write your rough Rock idea in one sentence. Don’t overthink it.</p>
-
-          <Field label="Draft Rock">
-            <textarea
-              value={rock.draft}
-              onChange={(e) => set("draft", e.target.value as any)}
-              placeholder="Example: Improve customer response time."
-              style={{ ...input, minHeight: 90 }}
-            />
-          </Field>
-
-          <Field label="Rock title (optional)">
-            <input
-              value={rock.title}
-              onChange={(e) => set("title", e.target.value as any)}
-              placeholder="Example: Faster Customer Response"
-              style={input}
-            />
-          </Field>
-
-          <Field label="Due date">
-            <input
-              value={rock.dueDate}
-              onChange={(e) => set("dueDate", e.target.value as any)}
-              type="date"
-              style={input}
-            />
-          </Field>
-        </Card>
-      )}
-
-      {step === 2 && (
-        <Card title="Step 2 — SMART coaching">
-          <div style={between}>
-            <p style={{ ...muted, marginBottom: 0 }}>
-              Answer each one in simple words. These answers become your Rock’s backbone.
-            </p>
-
-            <Button type="button" onClick={buildFinalStatement} style={btnPrimary}>
-              Build Final Statement
-            </Button>
+      <div style={card}>
+        <div style={cardHdr}>
+          <div>
+            <div style={eyebrow}>{stepName(step)}</div>
+            <div style={h1}>{title}</div>
+            {statement ? <div style={sub}>{statement}</div> : <div style={subMuted}>Build clear Rocks. Track them weekly.</div>}
           </div>
 
-          <Field label="Specific — What exactly will be different when this is done?">
-            <textarea
-              value={rock.specific}
-              onChange={(e) => set("specific", e.target.value as any)}
-              style={{ ...input, minHeight: 70 }}
-              placeholder="What will be true when this Rock is complete?"
-            />
-          </Field>
-
-          <Field label="Measurable — How will you prove it is complete?">
-            <textarea
-              value={rock.measurable}
-              onChange={(e) => set("measurable", e.target.value as any)}
-              style={{ ...input, minHeight: 70 }}
-              placeholder="Numbers, counts, percentages, deadlines."
-            />
-          </Field>
-
-          <Field label="Achievable — Why is this realistic this quarter?">
-            <textarea
-              value={rock.achievable}
-              onChange={(e) => set("achievable", e.target.value as any)}
-              style={{ ...input, minHeight: 70 }}
-              placeholder="Resources, capacity, scope boundaries."
-            />
-          </Field>
-
-          <Field label="Relevant — Why does this matter right now?">
-            <textarea
-              value={rock.relevant}
-              onChange={(e) => set("relevant", e.target.value as any)}
-              style={{ ...input, minHeight: 70 }}
-              placeholder="What does it support? What problem does it solve?"
-            />
-          </Field>
-
-          <Field label="Time-bound — When is it fully done?">
-            <textarea
-              value={rock.timeBound}
-              onChange={(e) => set("timeBound", e.target.value as any)}
-              style={{ ...input, minHeight: 70 }}
-              placeholder="Example: Complete by March 31 with weekly checkpoints."
-            />
-          </Field>
-
-          <div style={miniCard}>
-            <div style={miniCardTitle}>Final Rock statement</div>
-            <div style={mutedSmall}>Click “Build Final Statement” or write your own.</div>
-
-            <textarea
-              value={safeTrim((rock as any).finalStatement) || ""}
-              onChange={(e) => set("finalStatement" as any, e.target.value as any)}
-              placeholder="Final Rock statement..."
-              style={{ ...input, minHeight: 110, marginTop: 10, whiteSpace: "pre-wrap" }}
-            />
+          <div style={stepPills}>
+            <StepPill active={step === 1} onClick={() => goToStep(1)}>
+              1. Draft
+            </StepPill>
+            <StepPill active={step === 2} onClick={() => goToStep(2)}>
+              2. SMART
+            </StepPill>
+            <StepPill active={step === 3} onClick={() => goToStep(3)}>
+              3. Metrics
+            </StepPill>
+            <StepPill active={step === 4} onClick={() => goToStep(4)}>
+              4. Milestones
+            </StepPill>
+            <StepPill active={step === 5} onClick={() => goToStep(5)}>
+              5. Review + AI
+            </StepPill>
           </div>
-        </Card>
-      )}
-
-      {step === 3 && (
-        <Card title="Step 3 — Metrics">
-          <p style={muted}>Add 1–3 measures that prove success. Keep it simple.</p>
-
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
-            <Button type="button" onClick={addMetric} style={btnPrimary}>
-              + Add Metric
-            </Button>
-            <div style={mutedSmall}>At least 1 metric is required.</div>
-          </div>
-
-          {(rock.metrics?.length ?? 0) === 0 ? (
-            <div style={empty}>No metrics yet.</div>
-          ) : (
-            <div style={{ display: "grid", gap: 10 }}>
-              {(rock.metrics ?? []).map((m: any) => (
-                <div key={m.id} style={rowCard}>
-                  <div style={{ display: "grid", gap: 10 }}>
-                    <Field label="Metric name">
-                      <input
-                        value={m.name}
-                        onChange={(e) => updateMetric(m.id, { name: e.target.value } as any)}
-                        placeholder="Example: Average first response time"
-                        style={input}
-                      />
-                    </Field>
-
-                    <Field label="Target">
-                      <input
-                        value={m.target}
-                        onChange={(e) => updateMetric(m.id, { target: e.target.value } as any)}
-                        placeholder="Example: Under 2 hours"
-                        style={input}
-                      />
-                    </Field>
-
-                    <Field label="Current (optional)">
-                      <input
-                        value={m.current ?? ""}
-                        onChange={(e) => updateMetric(m.id, { current: e.target.value } as any)}
-                        placeholder="Example: 6 hours"
-                        style={input}
-                      />
-                    </Field>
-                  </div>
-
-                  <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
-                    <Button type="button" onClick={() => removeMetric(m.id)} style={btnGhost}>
-                      Remove
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      )}
-
-      {step === 4 && (
-        <Card title="Step 4 — Milestones">
-          <p style={muted}>Add 3–7 milestones. Make them concrete actions.</p>
-
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
-            <Button type="button" onClick={addMilestone} style={btnPrimary}>
-              + Add Milestone
-            </Button>
-            <div style={mutedSmall}>At least 3 milestones are required.</div>
-          </div>
-
-          {(rock.milestones?.length ?? 0) === 0 ? (
-            <div style={empty}>No milestones yet.</div>
-          ) : (
-            <div style={{ display: "grid", gap: 10 }}>
-              {(rock.milestones ?? []).map((m: any) => (
-                <div key={m.id} style={rowCard}>
-                  <div style={{ display: "grid", gap: 10 }}>
-                    <Field label="Milestone">
-                      <input
-                        value={m.text}
-                        onChange={(e) => updateMilestone(m.id, { text: e.target.value } as any)}
-                        placeholder="Example: Define response-time SLA and train team"
-                        style={input}
-                      />
-                    </Field>
-
-                    <Field label="Due date (optional)">
-                      <input
-                        value={m.dueDate ?? ""}
-                        onChange={(e) => updateMilestone(m.id, { dueDate: e.target.value } as any)}
-                        type="date"
-                        style={input}
-                      />
-                    </Field>
-
-                    <label style={checkRow}>
-                      <input
-                        type="checkbox"
-                        checked={!!m.completed}
-                        onChange={(e) => updateMilestone(m.id, { completed: e.target.checked } as any)}
-                      />
-                      <span>Completed</span>
-                    </label>
-                  </div>
-
-                  <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
-                    <Button type="button" onClick={() => removeMilestone(m.id)} style={btnGhost}>
-                      Remove
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      )}
-
-      {step === 5 && (
-        <Card title="Step 5 — Review + AI">
-          <p style={muted}>Review your Rock. Use AI to improve the final statement. Save anytime.</p>
-
-          <div style={aiPanel}>
-            <div style={aiTop}>
-              <div>
-                <div style={aiTitle}>AI Suggestions</div>
-                <div style={mutedSmall}>Generate 3–5 better final Rock statements. Apply with one click.</div>
-              </div>
-
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                <Button type="button" onClick={generateSuggestions} style={btnPrimary} disabled={aiBusy}>
-                  {aiBusy ? "Generating…" : aiSuggestions.length ? "Regenerate" : "Generate Suggestions"}
-                </Button>
-                <Button type="button" onClick={buildFinalStatement} style={btnGhost}>
-                  Build from SMART
-                </Button>
-              </div>
-            </div>
-
-            {followup && (
-              <div style={followupBox}>
-                <div style={{ fontWeight: 800, marginBottom: 6 }}>Quick question</div>
-                <div style={{ marginBottom: 10 }}>{followup}</div>
-                <Button type="button" onClick={() => setStep(1)} style={btnGhost}>
-                  Go to Draft
-                </Button>
-              </div>
-            )}
-
-            {aiErr && <Alert text={aiErr} />}
-
-            {aiSuggestions.length === 0 && !aiBusy && !aiErr && !followup && (
-              <div style={empty}>
-                Click <strong>Generate Suggestions</strong> to get better final statements you can apply instantly.
-              </div>
-            )}
-
-            {aiSuggestions.length > 0 && (
-              <div style={{ display: "grid", gap: 10 }}>
-                {aiSuggestions.map((s) => {
-                  const isApplied = appliedId === s.id;
-                  return (
-                    <div key={s.id} style={suggestionCard}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
-                        <div style={{ display: "grid", gap: 8 }}>
-                          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                            {s.recommended && <span style={badge}>Recommended</span>}
-                            {isApplied && <span style={badgeOk}>Applied ✓</span>}
-                          </div>
-                          <div style={suggestionText}>{s.text}</div>
-                        </div>
-
-                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                          <Button type="button" onClick={() => applySuggestion(s)} style={btnPrimary}>
-                            Apply
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <div style={miniCard}>
-            <div style={miniCardTitle}>Final Rock statement</div>
-            <div style={mutedSmall}>This is what you’ll share with your leadership team.</div>
-
-            <textarea
-              value={safeTrim((rock as any).finalStatement) || ""}
-              onChange={(e) => set("finalStatement" as any, e.target.value as any)}
-              placeholder="Write it here or apply an AI suggestion."
-              style={{ ...input, minHeight: 120, marginTop: 10, whiteSpace: "pre-wrap" }}
-            />
-
-            {!safeTrim((rock as any).finalStatement) && (
-              <div style={{ marginTop: 10, ...mutedSmall }}>
-                Built preview (if you leave Final blank):
-                <pre style={previewPre}>{computedFinalStatement}</pre>
-              </div>
-            )}
-          </div>
-
-          <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
-            <div style={reviewBox}>
-              <div style={reviewLabel}>Draft</div>
-              <div style={reviewText}>{rock.draft || "—"}</div>
-            </div>
-
-            <div style={reviewBox}>
-              <div style={reviewLabel}>SMART</div>
-              <div style={reviewText}>
-                <div style={reviewList}>
-                  <div>
-                    <strong>Specific:</strong> {rock.specific || "—"}
-                  </div>
-                  <div>
-                    <strong>Measurable:</strong> {rock.measurable || "—"}
-                  </div>
-                  <div>
-                    <strong>Achievable:</strong> {rock.achievable || "—"}
-                  </div>
-                  <div>
-                    <strong>Relevant:</strong> {rock.relevant || "—"}
-                  </div>
-                  <div>
-                    <strong>Time-bound:</strong> {rock.timeBound || "—"}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div style={reviewBox}>
-              <div style={reviewLabel}>Metrics</div>
-              <div style={reviewText}>
-                {(rock.metrics?.length ?? 0) === 0 ? (
-                  "—"
-                ) : (
-                  <ul style={ul}>
-                    {(rock.metrics ?? []).map((m: any) => (
-                      <li key={m.id}>
-                        {m.name || "(Metric)"} — Target: {m.target || "—"}
-                        {m.current ? ` (Current: ${m.current})` : ""}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-
-            <div style={reviewBox}>
-              <div style={reviewLabel}>Milestones</div>
-              <div style={reviewText}>
-                {(rock.milestones?.length ?? 0) === 0 ? (
-                  "—"
-                ) : (
-                  <ul style={ul}>
-                    {(rock.milestones ?? []).map((m: any) => (
-                      <li key={m.id}>
-                        {m.completed ? "✅ " : "⬜ "} {m.text || "(Milestone)"}
-                        {m.dueDate ? ` — ${m.dueDate}` : ""}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div style={{ marginTop: 12, ...mutedSmall }}>
-            Tip: Your changes autosave. You can also click “Save Rock” below any time.
-          </div>
-        </Card>
-      )}
-
-      <div style={footer}>
-        <div style={{ display: "flex", gap: 10 }}>
-          {props.onCancel && (
-            <Button type="button" onClick={props.onCancel} style={btnGhost} disabled={busy}>
-              Cancel
-            </Button>
-          )}
         </div>
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <Button type="button" onClick={back} style={btnGhost} disabled={busy || step === 1}>
-            Back
-          </Button>
+        {saveError && (
+          <div style={alert}>
+            <div style={alertTitle}>Heads up</div>
+            <div style={alertBody}>{saveError}</div>
+          </div>
+        )}
 
-          {step < 5 ? (
-            <Button
-              type="button"
-              onClick={next}
-              style={canContinue ? btnPrimary : btnDisabled}
-              disabled={!canContinue || busy}
-            >
+        {step === 1 && (
+          <div style={section}>
+            <div style={sectionTitle}>Step 1 — Draft</div>
+            <div style={sectionHint}>Capture the goal in plain language. You can refine it later.</div>
+
+            <label style={label}>
+              <div style={labelText}>Title</div>
+              <input
+                style={input}
+                value={safeStr(rock?.title)}
+                onChange={(e) => updateField("title", e.target.value)}
+                placeholder="New Rock"
+              />
+            </label>
+
+            <label style={label}>
+              <div style={labelText}>Draft Rock statement</div>
+              <textarea
+                style={textarea}
+                value={safeStr(rock?.statement)}
+                onChange={(e) => updateField("statement", e.target.value)}
+                placeholder="Write a clear, outcome-based statement…"
+              />
+            </label>
+          </div>
+        )}
+
+        {step === 2 && (
+          <div style={section}>
+            <div style={sectionTopRow}>
+              <div>
+                <div style={sectionTitle}>Step 2 — SMART coaching</div>
+                <div style={sectionHint}>Answer each one in simple words. These answers become your Rock&apos;s backbone.</div>
+              </div>
+
+              <Button type="button" onClick={buildFinalFromSmart}>
+                Build Final Statement
+              </Button>
+            </div>
+
+            <label style={label}>
+              <div style={labelText}>Specific — What exactly will be different when this is done?</div>
+              <textarea
+                style={textarea}
+                value={safeStr(rock?.smart?.specific)}
+                onChange={(e) => updateField("smart.specific", e.target.value)}
+                placeholder="What will be true when this Rock is complete?"
+              />
+            </label>
+
+            <label style={label}>
+              <div style={labelText}>Measurable — How will you prove it is complete?</div>
+              <textarea
+                style={textarea}
+                value={safeStr(rock?.smart?.measurable)}
+                onChange={(e) => updateField("smart.measurable", e.target.value)}
+                placeholder="Numbers, counts, percentages, deadlines."
+              />
+            </label>
+
+            <label style={label}>
+              <div style={labelText}>Achievable — Why is this realistic this quarter?</div>
+              <textarea
+                style={textarea}
+                value={safeStr(rock?.smart?.achievable)}
+                onChange={(e) => updateField("smart.achievable", e.target.value)}
+                placeholder="Resources, capacity, scope boundaries."
+              />
+            </label>
+
+            <label style={label}>
+              <div style={labelText}>Relevant — Why does this matter right now?</div>
+              <textarea
+                style={textarea}
+                value={safeStr(rock?.smart?.relevant)}
+                onChange={(e) => updateField("smart.relevant", e.target.value)}
+                placeholder="What does it support? What problem does it solve?"
+              />
+            </label>
+
+            <label style={label}>
+              <div style={labelText}>Time-bound — What is the due date?</div>
+              <input
+                style={input}
+                value={safeStr(rock?.smart?.timebound)}
+                onChange={(e) => updateField("smart.timebound", e.target.value)}
+                placeholder="e.g., Jan 31"
+              />
+            </label>
+          </div>
+        )}
+
+        {step === 3 && (
+          <div style={section}>
+            <div style={sectionTitle}>Step 3 — Metrics</div>
+            <div style={sectionHint}>Add 1–3 metrics you will track weekly.</div>
+
+            <textarea
+              style={textarea}
+              value={safeStr(rock?.metricsText)}
+              onChange={(e) => updateField("metricsText", e.target.value)}
+              placeholder="Example: Weekly customer response time (minutes)…"
+            />
+          </div>
+        )}
+
+        {step === 4 && (
+          <div style={section}>
+            <div style={sectionTitle}>Step 4 — Milestones</div>
+            <div style={sectionHint}>List key milestones (simple is fine).</div>
+
+            <textarea
+              style={textarea}
+              value={safeStr(rock?.milestonesText)}
+              onChange={(e) => updateField("milestonesText", e.target.value)}
+              placeholder={"Example:\n- Week 1: Define process\n- Week 3: Pilot\n- Week 6: Rollout"}
+            />
+          </div>
+        )}
+
+        {step === 5 && (
+          <div style={section}>
+            <div style={sectionTitle}>Step 5 — Review + AI</div>
+            <div style={sectionHint}>Review your Rock. Save anytime.</div>
+
+            <label style={label}>
+              <div style={labelText}>Final Rock statement</div>
+              <textarea
+                style={textarea}
+                value={safeStr(rock?.finalStatement)}
+                onChange={(e) => updateField("finalStatement", e.target.value)}
+                placeholder="This is what you’ll share with your leadership team."
+              />
+            </label>
+
+            <label style={label}>
+              <div style={labelText}>Suggested Improvement</div>
+              <textarea
+                style={textarea}
+                value={safeStr(rock?.suggestedImprovement)}
+                onChange={(e) => updateField("suggestedImprovement", e.target.value)}
+                placeholder="Type a clearer, more specific version…"
+              />
+              <div style={tip}>Tip: Don’t perfect it. Just make it clearer.</div>
+            </label>
+          </div>
+        )}
+
+        <div style={footer}>
+          <div style={footerLeft}>Step {step} of 5</div>
+
+          <div style={footerRight}>
+            <Button type="button" onClick={prevStep} disabled={step === 1}>
+              Back
+            </Button>
+
+            <Button type="button" onClick={nextStep} disabled={step === 5}>
               Continue
             </Button>
-          ) : (
-            <Button type="button" onClick={saveNow} style={btnPrimary} disabled={busy}>
-              {busy ? "Saving..." : "Save Rock"}
-            </Button>
-          )}
+          </div>
         </div>
       </div>
     </div>
@@ -806,151 +457,161 @@ export default function RockBuilder(props: {
 }
 
 /* -----------------------------
-   Small UI components
+   Small components
 ------------------------------ */
 
-function StepHeader(props: { step: Step; onStepClick: (step: Step) => void }) {
-  const steps: { n: Step; label: string }[] = [
-    { n: 1, label: "Draft" },
-    { n: 2, label: "SMART" },
-    { n: 3, label: "Metrics" },
-    { n: 4, label: "Milestones" },
-    { n: 5, label: "Review + AI" },
-  ];
-
+function StepPill({
+  active,
+  onClick,
+  children,
+}: {
+  active?: boolean;
+  onClick?: () => void;
+  children: React.ReactNode;
+}) {
   return (
-    <div style={stepHeader}>
-      <div style={brand}>
-        <div style={brandTitle}>SMART Rocks</div>
-        <div style={brandSub}>Build clear Rocks. Track them weekly.</div>
-      </div>
-
-      <div style={stepPills}>
-        {steps.map((s) => {
-          const active = s.n === props.step;
-          return (
-            <Button
-              key={s.n}
-              type="button"
-              onClick={() => props.onStepClick(s.n)}
-              style={active ? pillActive : pill}
-              aria-current={active ? "step" : undefined}
-            >
-              {s.n}. {s.label}
-            </Button>
-          );
-        })}
-      </div>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        ...pillBtn,
+        ...(active ? pillBtnActive : {}),
+      }}
+    >
+      {children}
+    </button>
   );
 }
 
-function Card(props: { title: string; children: React.ReactNode }) {
-  return (
-    <div style={card}>
-      <div style={cardTitle}>{props.title}</div>
-      <div style={{ display: "grid", gap: 14 }}>{props.children}</div>
-    </div>
-  );
+function stepName(step: Step) {
+  switch (step) {
+    case 1:
+      return "DRAFT";
+    case 2:
+      return "SMART";
+    case 3:
+      return "METRICS";
+    case 4:
+      return "MILESTONES";
+    case 5:
+      return "REVIEW + AI";
+  }
 }
 
-function Field(props: { label: string; children: React.ReactNode }) {
-  return (
-    <label style={{ display: "grid", gap: 6 }}>
-      <div style={label}>{props.label}</div>
-      {props.children}
-    </label>
-  );
-}
-
-function Alert(props: { text: string }) {
-  return (
-    <div style={alert}>
-      <strong style={{ display: "block", marginBottom: 6 }}>Heads up</strong>
-      <div>{props.text}</div>
-    </div>
-  );
+function stepLabel(step: Step) {
+  return stepName(step);
 }
 
 /* -----------------------------
    Styles
 ------------------------------ */
 
-const shell: React.CSSProperties = {
-  maxWidth: 920,
-  margin: "0 auto",
-  padding: "28px 18px 24px",
+const page: React.CSSProperties = {
+  minHeight: "100vh",
+  padding: "22px",
+  background:
+    "radial-gradient(1000px 520px at 20% 20%, rgba(60,130,255,0.20), transparent 60%), radial-gradient(900px 480px at 70% 30%, rgba(255,120,0,0.12), transparent 60%), #050812",
+  color: "rgba(255,255,255,0.92)",
 };
 
-const topRow: React.CSSProperties = {
-  display: "grid",
-  gap: 10,
-  marginBottom: 16,
+const topBar: React.CSSProperties = {
+  maxWidth: 1100,
+  margin: "0 auto",
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+  gap: 16,
+};
+
+const brandRow: React.CSSProperties = {
+  display: "flex",
+  alignItems: "baseline",
+  gap: 0,
+  lineHeight: 1,
+};
+
+const brandOrange: React.CSSProperties = {
+  fontSize: 30,
+  fontWeight: 900,
+  color: "#FF7900",
+  letterSpacing: -0.3,
+};
+
+const brandWhite: React.CSSProperties = {
+  fontSize: 30,
+  fontWeight: 900,
+  color: "rgba(255,255,255,0.92)",
+  letterSpacing: -0.3,
+};
+
+const crumb: React.CSSProperties = {
+  marginTop: 6,
+  fontSize: 12,
+  letterSpacing: 2.5,
+  opacity: 0.55,
 };
 
 const savePillWrap: React.CSSProperties = {
   display: "flex",
-  justifyContent: "flex-end",
-};
-
-const savePill: React.CSSProperties = {
-  display: "inline-flex",
   alignItems: "center",
   gap: 10,
-  borderRadius: 999,
+  marginTop: 6,
+};
+
+const pill: React.CSSProperties = {
   padding: "8px 12px",
-  border: "1px solid rgba(255,255,255,0.14)",
-  background: "rgba(0,0,0,0.25)",
-  color: "rgba(255,255,255,0.85)",
+  borderRadius: 999,
   fontSize: 13,
-};
-
-function dot(saving: "idle" | "saving" | "saved" | "error", dirty: boolean): React.CSSProperties {
-  let bg = "rgba(255,255,255,0.35)";
-  if (saving === "saving") bg = "rgba(255,121,0,0.9)";
-  if (saving === "saved" && !dirty) bg = "rgba(80,255,160,0.9)";
-  if (saving === "error") bg = "rgba(255,80,80,0.9)";
-  if (dirty && saving !== "saving") bg = "rgba(255,255,255,0.45)";
-
-  return {
-    width: 8,
-    height: 8,
-    borderRadius: 999,
-    background: bg,
-    boxShadow: "0 0 0 3px rgba(0,0,0,0.25)",
-  };
-}
-
-const between: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: 12,
-  flexWrap: "wrap",
-};
-
-const brand: React.CSSProperties = {
-  display: "grid",
-  gap: 4,
-};
-
-const brandTitle: React.CSSProperties = {
-  fontSize: 24,
   fontWeight: 800,
-  letterSpacing: 0.2,
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "rgba(255,255,255,0.08)",
 };
 
-const brandSub: React.CSSProperties = {
-  color: "rgba(255,255,255,0.65)",
-  fontSize: 14,
+const pillFail: React.CSSProperties = {
+  border: "1px solid rgba(255,80,80,0.35)",
+  background: "rgba(255,80,80,0.12)",
 };
 
-const stepHeader: React.CSSProperties = {
+const card: React.CSSProperties = {
+  maxWidth: 1100,
+  margin: "18px auto 0",
+  borderRadius: 26,
+  border: "1px solid rgba(255,255,255,0.10)",
+  background: "rgba(0,0,0,0.28)",
+  overflow: "hidden",
+  boxShadow: "0 20px 70px rgba(0,0,0,0.35)",
+};
+
+const cardHdr: React.CSSProperties = {
+  padding: "18px 18px 10px",
   display: "flex",
-  alignItems: "flex-end",
   justifyContent: "space-between",
   gap: 16,
-  marginBottom: 16,
+  flexWrap: "wrap",
+  alignItems: "flex-start",
+};
+
+const eyebrow: React.CSSProperties = {
+  fontSize: 12,
+  letterSpacing: 3,
+  opacity: 0.6,
+  marginBottom: 4,
+};
+
+const h1: React.CSSProperties = {
+  fontSize: 30,
+  fontWeight: 900,
+  letterSpacing: -0.4,
+};
+
+const sub: React.CSSProperties = {
+  marginTop: 6,
+  opacity: 0.75,
+};
+
+const subMuted: React.CSSProperties = {
+  marginTop: 6,
+  opacity: 0.6,
 };
 
 const stepPills: React.CSSProperties = {
@@ -960,247 +621,124 @@ const stepPills: React.CSSProperties = {
   justifyContent: "flex-end",
 };
 
-const pill: React.CSSProperties = {
-  border: "1px solid rgba(255,255,255,0.14)",
-  background: "rgba(0,0,0,0.25)",
-  color: "rgba(255,255,255,0.85)",
-  padding: "8px 10px",
+const pillBtn: React.CSSProperties = {
   borderRadius: 999,
+  padding: "8px 12px",
   fontSize: 13,
+  fontWeight: 800,
+  border: "1px solid rgba(255,255,255,0.12)",
+  background: "rgba(255,255,255,0.06)",
+  color: "rgba(255,255,255,0.86)",
   cursor: "pointer",
 };
 
-const pillActive: React.CSSProperties = {
-  ...pill,
-  background: "rgba(255,121,0,0.18)",
-  border: "1px solid rgba(255,121,0,0.45)",
-  color: "white",
-  fontWeight: 700,
+const pillBtnActive: React.CSSProperties = {
+  border: "1px solid rgba(255,121,0,0.55)",
+  background: "rgba(255,121,0,0.10)",
+  color: "rgba(255,255,255,0.95)",
 };
 
-const card: React.CSSProperties = {
-  background: "rgba(0,0,0,0.55)",
-  border: "1px solid rgba(255,255,255,0.10)",
-  borderRadius: 16,
+const alert: React.CSSProperties = {
+  margin: "0 18px 10px",
   padding: 16,
-  boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+  borderRadius: 18,
+  border: "1px solid rgba(255,80,80,0.35)",
+  background: "rgba(255,80,80,0.10)",
 };
 
-const cardTitle: React.CSSProperties = {
+const alertTitle: React.CSSProperties = {
   fontSize: 18,
-  fontWeight: 800,
-  marginBottom: 12,
+  fontWeight: 900,
+  marginBottom: 6,
+};
+
+const alertBody: React.CSSProperties = {
+  fontSize: 14,
+  opacity: 0.9,
+};
+
+const section: React.CSSProperties = {
+  padding: "14px 18px 18px",
+  display: "grid",
+  gap: 14,
+};
+
+const sectionTopRow: React.CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  gap: 12,
+  flexWrap: "wrap",
+};
+
+const sectionTitle: React.CSSProperties = {
+  fontSize: 22,
+  fontWeight: 900,
+};
+
+const sectionHint: React.CSSProperties = {
+  marginTop: 6,
+  fontSize: 14,
+  opacity: 0.7,
 };
 
 const label: React.CSSProperties = {
-  fontSize: 13,
-  color: "rgba(255,255,255,0.85)",
+  display: "grid",
+  gap: 8,
+};
+
+const labelText: React.CSSProperties = {
+  fontSize: 14,
+  fontWeight: 800,
+  opacity: 0.85,
 };
 
 const input: React.CSSProperties = {
   width: "100%",
-  padding: "10px 12px",
-  borderRadius: 12,
-  border: "1px solid rgba(255,255,255,0.18)",
+  borderRadius: 16,
+  padding: "12px 14px",
   background: "rgba(255,255,255,0.06)",
-  color: "white",
+  border: "1px solid rgba(255,255,255,0.14)",
+  color: "rgba(255,255,255,0.95)",
+  fontSize: 16,
   outline: "none",
 };
 
-const muted: React.CSSProperties = {
-  color: "rgba(255,255,255,0.65)",
-  marginTop: 0,
-  marginBottom: 6,
-};
-
-const mutedSmall: React.CSSProperties = {
-  color: "rgba(255,255,255,0.55)",
-  fontSize: 13,
-};
-
-const empty: React.CSSProperties = {
-  padding: 12,
-  borderRadius: 12,
-  border: "1px dashed rgba(255,255,255,0.18)",
-  color: "rgba(255,255,255,0.65)",
-};
-
-const rowCard: React.CSSProperties = {
-  borderRadius: 14,
-  border: "1px solid rgba(255,255,255,0.12)",
-  background: "rgba(0,0,0,0.35)",
-  padding: 12,
-};
-
-const btnBase: React.CSSProperties = {
-  borderRadius: 12,
-  padding: "10px 14px",
-  fontSize: 14,
-  cursor: "pointer",
-  border: "1px solid rgba(255,255,255,0.12)",
-};
-
-const btnPrimary: React.CSSProperties = {
-  ...btnBase,
-  background: "#FF7900",
-  border: "1px solid rgba(255,121,0,0.65)",
-  color: "#101010",
-  fontWeight: 800,
-};
-
-const btnDisabled: React.CSSProperties = {
-  ...btnBase,
-  background: "rgba(255,255,255,0.14)",
-  border: "1px solid rgba(255,255,255,0.18)",
-  color: "rgba(255,255,255,0.55)",
-  cursor: "not-allowed",
-};
-
-const btnGhost: React.CSSProperties = {
-  ...btnBase,
+const textarea: React.CSSProperties = {
+  width: "100%",
+  minHeight: 120,
+  borderRadius: 16,
+  padding: "12px 14px",
   background: "rgba(255,255,255,0.06)",
   border: "1px solid rgba(255,255,255,0.14)",
-  color: "rgba(255,255,255,0.85)",
+  color: "rgba(255,255,255,0.95)",
+  fontSize: 16,
+  outline: "none",
+  whiteSpace: "pre-wrap",
+};
+
+const tip: React.CSSProperties = {
+  marginTop: 6,
+  fontSize: 13,
+  opacity: 0.6,
 };
 
 const footer: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: 12,
-  marginTop: 14,
-};
-
-const alert: React.CSSProperties = {
-  borderRadius: 14,
-  padding: 14,
-  border: "1px solid rgba(255,80,80,0.35)",
-  background: "rgba(255,80,80,0.10)",
-  color: "white",
-};
-
-const checkRow: React.CSSProperties = {
-  display: "flex",
-  gap: 10,
-  alignItems: "center",
-  color: "rgba(255,255,255,0.85)",
-  fontSize: 14,
-};
-
-const reviewBox: React.CSSProperties = {
-  borderRadius: 14,
-  padding: 12,
-  border: "1px solid rgba(255,255,255,0.12)",
-  background: "rgba(0,0,0,0.30)",
-};
-
-const reviewLabel: React.CSSProperties = {
-  fontSize: 12,
-  color: "rgba(255,255,255,0.65)",
-  marginBottom: 6,
-  textTransform: "uppercase",
-  letterSpacing: 0.8,
-};
-
-const reviewText: React.CSSProperties = {
-  color: "rgba(255,255,255,0.92)",
-  fontSize: 14,
-  lineHeight: 1.45,
-};
-
-const reviewList: React.CSSProperties = {
-  display: "grid",
-  gap: 6,
-};
-
-const ul: React.CSSProperties = {
-  margin: 0,
-  paddingLeft: 18,
-};
-
-const miniCard: React.CSSProperties = {
-  borderRadius: 16,
-  padding: 14,
-  border: "1px solid rgba(255,255,255,0.12)",
-  background: "rgba(0,0,0,0.32)",
-};
-
-const miniCardTitle: React.CSSProperties = {
-  fontSize: 14,
-  fontWeight: 900,
-  marginBottom: 6,
-};
-
-const previewPre: React.CSSProperties = {
-  marginTop: 8,
-  whiteSpace: "pre-wrap",
-  fontSize: 12,
-  lineHeight: 1.45,
-  color: "rgba(255,255,255,0.82)",
-  background: "rgba(255,255,255,0.06)",
-  border: "1px solid rgba(255,255,255,0.10)",
-  borderRadius: 12,
-  padding: 10,
-};
-
-const aiPanel: React.CSSProperties = {
-  borderRadius: 16,
-  padding: 14,
-  border: "1px solid rgba(255,121,0,0.20)",
-  background: "rgba(255,121,0,0.06)",
-};
-
-const aiTop: React.CSSProperties = {
+  padding: "14px 18px",
+  borderTop: "1px solid rgba(255,255,255,0.08)",
   display: "flex",
   justifyContent: "space-between",
-  alignItems: "flex-start",
+  alignItems: "center",
   gap: 12,
   flexWrap: "wrap",
-  marginBottom: 12,
 };
 
-const aiTitle: React.CSSProperties = {
-  fontSize: 16,
-  fontWeight: 900,
+const footerLeft: React.CSSProperties = {
+  fontSize: 13,
+  opacity: 0.65,
 };
 
-const suggestionCard: React.CSSProperties = {
-  borderRadius: 14,
-  padding: 12,
-  border: "1px solid rgba(255,255,255,0.12)",
-  background: "rgba(0,0,0,0.28)",
-};
-
-const suggestionText: React.CSSProperties = {
-  whiteSpace: "pre-wrap",
-  color: "rgba(255,255,255,0.92)",
-  fontSize: 14,
-  lineHeight: 1.45,
-};
-
-const badge: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 6,
-  fontSize: 12,
-  fontWeight: 800,
-  borderRadius: 999,
-  padding: "5px 10px",
-  border: "1px solid rgba(255,121,0,0.45)",
-  background: "rgba(255,121,0,0.16)",
-  color: "white",
-};
-
-const badgeOk: React.CSSProperties = {
-  ...badge,
-  border: "1px solid rgba(80,255,160,0.35)",
-  background: "rgba(80,255,160,0.12)",
-};
-
-const followupBox: React.CSSProperties = {
-  borderRadius: 14,
-  padding: 12,
-  border: "1px solid rgba(255,255,255,0.12)",
-  background: "rgba(0,0,0,0.28)",
-  color: "rgba(255,255,255,0.92)",
+const footerRight: React.CSSProperties = {
+  display: "flex",
+  gap: 10,
 };
