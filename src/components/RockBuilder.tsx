@@ -7,12 +7,10 @@
      * Saves only on: Continue to SMART, Improve with AI
      * (Save Draft button removed from Step 1 footer — optional behavior removed)
    - Steps 2–5 can autosave (debounced) to reduce friction
-   - OPTION 3 (AI payoff):
-     * click Improve with AI
-     * calls /api/rock-suggest
-     * applies top suggestion -> suggestedImprovement
-     * saves it
-     * jumps to Step 5
+   - AI on Step 5 (Review + AI):
+     * If no AI suggestion yet, primary footer button becomes "Improve with AI"
+     * Clicking it calls /api/rock-suggest, saves suggestedImprovement, stays on Step 5
+     * Once suggestion exists, primary button becomes "Done" and is disabled
    - New Rock doc creation:
      * If doc doesn't exist yet, create once via createRockWithId()
      * Then patch via updateRock()
@@ -26,6 +24,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/Button";
 import StepDraft from "@/components/rock/StepDraft";
+import StepSmart from "@/components/rock/StepSmart";
+import StepMetrics from "@/components/rock/StepMetrics";
+import StepMilestones from "@/components/rock/StepMilestones";
 import { createRockWithId, updateRock } from "@/lib/rocks";
 
 type Step = 1 | 2 | 3 | 4 | 5;
@@ -181,7 +182,6 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
 
   // Determine whether we likely already have a doc
   useEffect(() => {
-    // If we have an initialRock with matching id and userId, assume it exists.
     const hasDoc =
       !!initialRock &&
       !!safeTrim(initialRock?.userId) &&
@@ -201,6 +201,11 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
     return safeTrim(rock?.title).length > 0 || safeTrim(rock?.draft).length > 0;
   }, [rock?.title, rock?.draft]);
 
+  const hasAiSuggestion = useMemo(
+    () => safeTrim(rock?.suggestedImprovement).length > 0,
+    [rock?.suggestedImprovement]
+  );
+
   // -----------------------------------------
   // Low-level persistence primitives
   // -----------------------------------------
@@ -208,7 +213,6 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
   async function ensureCreatedIfNeeded(baseData?: any) {
     if (createdRef.current) return;
 
-    // Create with exact rockId so the URL is the id
     const payload = stripUndefinedDeep({
       ...(baseData || {}),
       id: rockId,
@@ -230,9 +234,7 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
     const cleaned = stripUndefinedDeep(patch || {});
     if (!cleaned || (typeof cleaned === "object" && Object.keys(cleaned).length === 0)) return;
 
-    // If doc doesn't exist yet, create it first
     await ensureCreatedIfNeeded(cleaned);
-
     await updateRock(uid, rockId, cleaned);
   }
 
@@ -368,7 +370,6 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
 
     setDraftBanner(null);
 
-    // Save draft first, then go to Step 2
     try {
       setSaveState("saving");
       setSaveError(null);
@@ -410,7 +411,6 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
     setDraftBanner(null);
 
     try {
-      // Make sure the draft itself is saved first (explicitly)
       setSaveState("saving");
       await persistPatchNow({
         title: safeStr(rock?.title),
@@ -437,13 +437,11 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
       const top = safeTrim(suggestions?.[0]?.text);
       if (!top) throw new Error("AI did not return a suggestion.");
 
-      // Apply locally (NO autosave here — we will explicitly persist below)
       setRock((prev: any) => ({
         ...(prev || {}),
         suggestedImprovement: top,
       }));
 
-      // Persist suggestion + step, then jump to Step 5
       await persistPatchNow({
         suggestedImprovement: top,
         step: 5,
@@ -465,6 +463,78 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
         kind: "error",
         text: e?.message || "AI suggestions are temporarily unavailable.",
       });
+    } finally {
+      if (aliveRef.current) setAiLoading(false);
+    }
+  }
+
+  // -----------------------------------------
+  // Step 5 — Improve with AI (from Review screen)
+  // -----------------------------------------
+
+  async function improveWithAiFromReview() {
+    const d = safeTrim(rock?.draft);
+    const t = safeTrim(rock?.title);
+
+    if (!d && !t) {
+      setAiError("Add a title or a draft statement first.");
+      return;
+    }
+
+    setAiLoading(true);
+    setAiError(null);
+
+    try {
+      setSaveState("saving");
+      setSaveError(null);
+
+      await persistPatchNow({
+        title: safeStr(rock?.title),
+        draft: safeStr(rock?.draft),
+        step: 5,
+      });
+
+      const res = await fetch("/api/rock-suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draft: safeStr(rock?.draft), title: safeStr(rock?.title) }),
+      });
+
+      if (!res.ok) throw new Error(`AI request failed (${res.status}).`);
+
+      const data = await res.json();
+
+      const suggestions: AiSuggestion[] = Array.isArray(data?.suggestions)
+        ? data.suggestions
+        : Array.isArray(data)
+          ? data
+          : [];
+
+      const top = safeTrim(suggestions?.[0]?.text);
+      if (!top) throw new Error("AI did not return a suggestion.");
+
+      setRock((prev: any) => ({
+        ...(prev || {}),
+        suggestedImprovement: top,
+      }));
+
+      await persistPatchNow({
+        suggestedImprovement: top,
+        step: 5,
+      });
+
+      if (!aliveRef.current) return;
+
+      setSaveState("saved");
+      setStep(5);
+    } catch (e: any) {
+      devError("[RockBuilder] improveWithAiFromReview failed:", e);
+
+      if (!aliveRef.current) return;
+
+      setSaveState("failed");
+      setSaveError(e?.message || "AI suggestions are temporarily unavailable.");
+      setAiError(e?.message || "AI suggestions are temporarily unavailable.");
     } finally {
       if (aliveRef.current) setAiLoading(false);
     }
@@ -495,16 +565,32 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
 
   const footerPrimaryLabel = useMemo(() => {
     if (step === 1) return "Continue to SMART";
+    if (step === 5) return hasAiSuggestion ? "Done" : "Improve with AI";
     return "Continue";
-  }, [step]);
+  }, [step, hasAiSuggestion]);
 
   async function footerPrimaryAction() {
     if (step === 1) {
       await continueFromDraftExplicit();
       return;
     }
+
+    if (step === 5) {
+      if (!hasAiSuggestion) {
+        await improveWithAiFromReview();
+      }
+      return;
+    }
+
     nextStep();
   }
+
+  const footerPrimaryDisabled = useMemo(() => {
+    if (saveState === "saving" || aiLoading) return true;
+    if (step === 1 && !hasDraftContent) return true;
+    if (step === 5 && hasAiSuggestion) return true; // "Done" is intentionally disabled
+    return false;
+  }, [saveState, aiLoading, step, hasDraftContent, hasAiSuggestion]);
 
   // -----------------------------------------
   // UI
@@ -533,7 +619,11 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
           <div>
             <div style={eyebrow}>{stepName(step)}</div>
             <div style={h1}>{title}</div>
-            {draft ? <div style={sub}>{draft}</div> : <div style={subMuted}>Build clear Rocks. Track them weekly.</div>}
+            {draft ? (
+              <div style={sub}>{draft}</div>
+            ) : (
+              <div style={subMuted}>Build clear Rocks. Track them weekly.</div>
+            )}
           </div>
         </div>
 
@@ -551,7 +641,6 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
           <StepDraft
             rock={rock}
             onChange={(next) => {
-              // ✅ LOCAL ONLY — no autosave per keystroke
               setRock(next);
             }}
             saving={saveState === "saving" || aiLoading}
@@ -566,102 +655,31 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
             STEP 2 — SMART (autosave OK)
            ====================================================== */}
         {step === 2 && (
-          <div style={section}>
-            <div style={sectionTopRow}>
-              <div>
-                <div style={sectionTitle}>Step 2 — SMART coaching</div>
-                <div style={sectionHint}>Answer each one in simple words. These answers become your Rock&apos;s backbone.</div>
-              </div>
-
-              <Button type="button" onClick={buildFinalFromSmart}>
-                Build Final Statement
-              </Button>
-            </div>
-
-            <label style={label}>
-              <div style={labelText}>Specific — What exactly will be different when this is done?</div>
-              <textarea
-                style={textarea}
-                value={safeStr(rock?.smart?.specific)}
-                onChange={(e) => updateField("smart.specific", e.target.value, { autosave: true })}
-                placeholder="What will be true when this Rock is complete?"
-              />
-            </label>
-
-            <label style={label}>
-              <div style={labelText}>Measurable — How will you prove it is complete?</div>
-              <textarea
-                style={textarea}
-                value={safeStr(rock?.smart?.measurable)}
-                onChange={(e) => updateField("smart.measurable", e.target.value, { autosave: true })}
-                placeholder="Numbers, counts, percentages, deadlines."
-              />
-            </label>
-
-            <label style={label}>
-              <div style={labelText}>Achievable — Why is this realistic this quarter?</div>
-              <textarea
-                style={textarea}
-                value={safeStr(rock?.smart?.achievable)}
-                onChange={(e) => updateField("smart.achievable", e.target.value, { autosave: true })}
-                placeholder="Resources, capacity, scope boundaries."
-              />
-            </label>
-
-            <label style={label}>
-              <div style={labelText}>Relevant — Why does this matter right now?</div>
-              <textarea
-                style={textarea}
-                value={safeStr(rock?.smart?.relevant)}
-                onChange={(e) => updateField("smart.relevant", e.target.value, { autosave: true })}
-                placeholder="What does it support? What problem does it solve?"
-              />
-            </label>
-
-            <label style={label}>
-              <div style={labelText}>Time-bound — What is the due date?</div>
-              <input
-                style={input}
-                value={safeStr(rock?.smart?.timebound)}
-                onChange={(e) => updateField("smart.timebound", e.target.value, { autosave: true })}
-                placeholder="e.g., Jan 31"
-              />
-            </label>
-          </div>
+          <StepSmart
+            rock={rock}
+            onUpdateField={(path, value) => updateField(path, value, { autosave: true })}
+            onBuildFinal={buildFinalFromSmart}
+          />
         )}
 
         {/* ======================================================
             STEP 3 — METRICS (autosave OK)
            ====================================================== */}
         {step === 3 && (
-          <div style={section}>
-            <div style={sectionTitle}>Step 3 — Metrics</div>
-            <div style={sectionHint}>Add 1–3 metrics you will track weekly.</div>
-
-            <textarea
-              style={textarea}
-              value={safeStr(rock?.metricsText)}
-              onChange={(e) => updateField("metricsText", e.target.value, { autosave: true })}
-              placeholder="Example: Weekly customer response time (minutes)…"
-            />
-          </div>
+          <StepMetrics
+            value={safeStr(rock?.metricsText)}
+            onChange={(next) => updateField("metricsText", next, { autosave: true })}
+          />
         )}
 
         {/* ======================================================
-            STEP 4 — MILESTONES (autosave OK)
+            STEP 4 — MILESTONES (autosave OK) ✅ MOVED OUT
            ====================================================== */}
         {step === 4 && (
-          <div style={section}>
-            <div style={sectionTitle}>Step 4 — Milestones</div>
-            <div style={sectionHint}>List key milestones (simple is fine).</div>
-
-            <textarea
-              style={textarea}
-              value={safeStr(rock?.milestonesText)}
-              onChange={(e) => updateField("milestonesText", e.target.value, { autosave: true })}
-              placeholder={"Example:\n- Week 1: Define process\n- Week 3: Pilot\n- Week 6: Rollout"}
-            />
-          </div>
+          <StepMilestones
+            value={safeStr(rock?.milestonesText)}
+            onChange={(next) => updateField("milestonesText", next, { autosave: true })}
+          />
         )}
 
         {/* ======================================================
@@ -707,16 +725,7 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
               Back
             </Button>
 
-            <Button
-              type="button"
-              onClick={footerPrimaryAction}
-              disabled={
-                step === 5 ||
-                saveState === "saving" ||
-                aiLoading ||
-                (step === 1 && !hasDraftContent)
-              }
-            >
+            <Button type="button" onClick={footerPrimaryAction} disabled={footerPrimaryDisabled}>
               {footerPrimaryLabel}
             </Button>
           </div>
@@ -882,14 +891,6 @@ const section: React.CSSProperties = {
   gap: 14,
 };
 
-const sectionTopRow: React.CSSProperties = {
-  display: "flex",
-  alignItems: "flex-start",
-  justifyContent: "space-between",
-  gap: 12,
-  flexWrap: "wrap",
-};
-
 const sectionTitle: React.CSSProperties = {
   fontSize: 22,
   fontWeight: 900,
@@ -910,17 +911,6 @@ const labelText: React.CSSProperties = {
   fontSize: 14,
   fontWeight: 800,
   opacity: 0.85,
-};
-
-const input: React.CSSProperties = {
-  width: "100%",
-  borderRadius: 16,
-  padding: "12px 14px",
-  background: "rgba(255,255,255,0.06)",
-  border: "1px solid rgba(255,255,255,0.14)",
-  color: "rgba(255,255,255,0.95)",
-  fontSize: 16,
-  outline: "none",
 };
 
 const textarea: React.CSSProperties = {

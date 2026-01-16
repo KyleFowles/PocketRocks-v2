@@ -2,11 +2,9 @@
    FILE: src/components/rock/StepSmart.tsx
 
    SCOPE:
-   Step 2 — SMART coaching (PHASE 2)
-   - Pure UI extraction only (NO persistence logic)
-   - Parent owns:
-     * updateField() autosave behavior
-     * buildFinalFromSmart() behavior
+   Step 2 — SMART coaching (UI-only)
+   - Keeps RockBuilder as the single "brain" (state + saving + navigation)
+   - This component renders the Step 2 UI and calls back into RockBuilder
    ============================================================ */
 
 "use client";
@@ -14,16 +12,11 @@
 import React from "react";
 import { Button } from "@/components/Button";
 
-import {
-  input,
-  label,
-  labelText,
-  section,
-  sectionHint,
-  sectionTitle,
-  sectionTopRow,
-  textarea,
-} from "@/components/rock/builderStyles";
+type Props = {
+  rock: any;
+  onUpdateField: (path: string, value: any) => void;
+  onBuildFinal: () => void;
+};
 
 function safeStr(v: any): string {
   if (typeof v === "string") return v;
@@ -35,14 +28,7 @@ function safeStr(v: any): string {
   }
 }
 
-type Props = {
-  rock: any;
-
-  onBuildFinalStatement: () => void;
-  onUpdateField: (path: string, value: any, opts?: { autosave?: boolean }) => void;
-};
-
-export default function StepSmart({ rock, onBuildFinalStatement, onUpdateField }: Props) {
+export default function StepSmart({ rock, onUpdateField, onBuildFinal }: Props) {
   return (
     <div style={section}>
       <div style={sectionTopRow}>
@@ -51,7 +37,7 @@ export default function StepSmart({ rock, onBuildFinalStatement, onUpdateField }
           <div style={sectionHint}>Answer each one in simple words. These answers become your Rock&apos;s backbone.</div>
         </div>
 
-        <Button type="button" onClick={onBuildFinalStatement}>
+        <Button type="button" onClick={onBuildFinal}>
           Build Final Statement
         </Button>
       </div>
@@ -61,7 +47,7 @@ export default function StepSmart({ rock, onBuildFinalStatement, onUpdateField }
         <textarea
           style={textarea}
           value={safeStr(rock?.smart?.specific)}
-          onChange={(e) => onUpdateField("smart.specific", e.target.value, { autosave: true })}
+          onChange={(e) => onUpdateField("smart.specific", e.target.value)}
           placeholder="What will be true when this Rock is complete?"
         />
       </label>
@@ -71,7 +57,7 @@ export default function StepSmart({ rock, onBuildFinalStatement, onUpdateField }
         <textarea
           style={textarea}
           value={safeStr(rock?.smart?.measurable)}
-          onChange={(e) => onUpdateField("smart.measurable", e.target.value, { autosave: true })}
+          onChange={(e) => onUpdateField("smart.measurable", e.target.value)}
           placeholder="Numbers, counts, percentages, deadlines."
         />
       </label>
@@ -81,7 +67,7 @@ export default function StepSmart({ rock, onBuildFinalStatement, onUpdateField }
         <textarea
           style={textarea}
           value={safeStr(rock?.smart?.achievable)}
-          onChange={(e) => onUpdateField("smart.achievable", e.target.value, { autosave: true })}
+          onChange={(e) => onUpdateField("smart.achievable", e.target.value)}
           placeholder="Resources, capacity, scope boundaries."
         />
       </label>
@@ -91,7 +77,7 @@ export default function StepSmart({ rock, onBuildFinalStatement, onUpdateField }
         <textarea
           style={textarea}
           value={safeStr(rock?.smart?.relevant)}
-          onChange={(e) => onUpdateField("smart.relevant", e.target.value, { autosave: true })}
+          onChange={(e) => onUpdateField("smart.relevant", e.target.value)}
           placeholder="What does it support? What problem does it solve?"
         />
       </label>
@@ -101,10 +87,75 @@ export default function StepSmart({ rock, onBuildFinalStatement, onUpdateField }
         <input
           style={input}
           value={safeStr(rock?.smart?.timebound)}
-          onChange={(e) => onUpdateField("smart.timebound", e.target.value, { autosave: true })}
+          onChange={(e) => onUpdateField("smart.timebound", e.target.value)}
           placeholder="e.g., Jan 31"
         />
       </label>
     </div>
   );
 }
+
+/* -----------------------------
+   Styles (temporary)
+   - We’ll centralize these into builderStyles.ts in a later pass
+------------------------------ */
+
+const section: React.CSSProperties = {
+  padding: "14px 18px 18px",
+  display: "grid",
+  gap: 14,
+};
+
+const sectionTopRow: React.CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  gap: 12,
+  flexWrap: "wrap",
+};
+
+const sectionTitle: React.CSSProperties = {
+  fontSize: 22,
+  fontWeight: 900,
+};
+
+const sectionHint: React.CSSProperties = {
+  marginTop: 6,
+  fontSize: 14,
+  opacity: 0.7,
+};
+
+const label: React.CSSProperties = {
+  display: "grid",
+  gap: 8,
+};
+
+const labelText: React.CSSProperties = {
+  fontSize: 14,
+  fontWeight: 800,
+  opacity: 0.85,
+};
+
+const input: React.CSSProperties = {
+  width: "100%",
+  borderRadius: 16,
+  padding: "12px 14px",
+  background: "rgba(255,255,255,0.06)",
+  border: "1px solid rgba(255,255,255,0.14)",
+  color: "rgba(255,255,255,0.95)",
+  fontSize: 16,
+  outline: "none",
+};
+
+const textarea: React.CSSProperties = {
+  width: "100%",
+  minHeight: 120,
+  borderRadius: 16,
+  padding: "12px 14px",
+  background: "rgba(255,255,255,0.06)",
+  border: "1px solid rgba(255,255,255,0.14)",
+  color: "rgba(255,255,255,0.95)",
+  fontSize: 16,
+  outline: "none",
+  whiteSpace: "pre-wrap",
+};
