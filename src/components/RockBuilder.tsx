@@ -16,6 +16,10 @@
      * Then patch via updateRock()
    - Prevent setState after unmount
    - Never sends undefined to Firestore
+
+   UX UPDATE (Step 1 input-first):
+   - Removes the big summary header on Step 1 so inputs appear immediately
+   - Keeps summary header for Steps 2–5
    ============================================================ */
 
 "use client";
@@ -392,9 +396,11 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
       if (!aliveRef.current) return;
 
       setSaveState("failed");
-      setSaveError(e?.message || "AI needs more information — here’s a SMART starter framework to help you.");
-      setAiError(e?.message || "AAI needs more information — here’s a SMART starter framework to help you.");
-      setDraftBanner({ kind: "error", text: e?.message || "AI needs more information — here’s a SMART starter framework to help you." });
+
+      const msg = "AI needs more information — here’s a SMART starter framework to help you.";
+      setSaveError(msg);
+      setAiError(msg);
+      setDraftBanner({ kind: "error", text: msg });
     } finally {
       if (aliveRef.current) setAiLoading(false);
     }
@@ -459,8 +465,10 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
       if (!aliveRef.current) return;
 
       setSaveState("failed");
-      setSaveError(e?.message || "AI suggestions are temporarily unavailable.");
-      setAiError(e?.message || "AI suggestions are temporarily unavailable.");
+
+      const msg = "AI needs more information — here’s a SMART starter framework to help you.";
+      setSaveError(msg);
+      setAiError(msg);
     } finally {
       if (aliveRef.current) setAiLoading(false);
     }
@@ -520,6 +528,8 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
   // UI
   // -----------------------------------------
 
+  const isStep1 = step === 1;
+
   return (
     <div style={styles.page}>
       <div style={styles.topBar}>
@@ -528,24 +538,65 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
             <span style={styles.brandOrange}>Pocket</span>
             <span style={styles.brandWhite}>Rocks</span>
           </div>
-          <div style={styles.crumb}>ROCK · {stepName(step)}</div>
+
+          {/* Slim context line (less busy, still orienting) */}
+          <div style={styles.crumb}>
+            {isStep1 ? "DRAFT · Step 1 of 5" : `ROCK · ${stepName(step)}`}
+          </div>
         </div>
 
         <div style={styles.savePillWrap}>
           {saveState === "saving" && <div style={styles.pill}>Saving…</div>}
-          {saveState === "saved" && <div style={{ ...styles.pill, opacity: 0.85 }}>Saved</div>}
-          {saveState === "failed" && <div style={{ ...styles.pill, ...styles.pillFail }}>Save failed</div>}
+          {saveState === "saved" && <div style={{ ...styles.pill, opacity: 0.65 }}>Saved</div>}
+          {saveState === "failed" && (
+            <div style={{ ...styles.pill, ...styles.pillFail }}>Save failed</div>
+          )}
         </div>
       </div>
 
       <div style={styles.card}>
-        <div style={styles.cardHdr}>
-          <div>
-            <div style={styles.eyebrow}>{stepName(step)}</div>
-            <div style={styles.h1}>{title}</div>
-            {draft ? <div style={styles.sub}>{draft}</div> : <div style={styles.subMuted}>Build clear Rocks. Track them weekly.</div>}
+        {/* ------------------------------------------------------
+            Step header: INPUT-FIRST on Step 1, full summary on 2–5
+           ------------------------------------------------------ */}
+        {isStep1 ? (
+          <div style={{ ...styles.cardHdr, paddingBottom: 10 }}>
+            <div>
+              {/* CHANGED: smaller + less dominant than the PocketRocks brand */}
+              <div
+                style={{
+                  fontSize: 18,
+                  fontWeight: 850,
+                  letterSpacing: -0.2,
+                  opacity: 0.92,
+                }}
+              >
+                Start with a plain-English goal
+              </div>
+
+              <div
+                style={{
+                  marginTop: 4,
+                  fontSize: 14,
+                  opacity: 0.65,
+                }}
+              >
+                Don’t overthink it. You’ll make it SMART next.
+              </div>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div style={styles.cardHdr}>
+            <div>
+              <div style={styles.eyebrow}>{stepName(step)}</div>
+              <div style={styles.h1}>{title}</div>
+              {draft ? (
+                <div style={styles.sub}>{draft}</div>
+              ) : (
+                <div style={styles.subMuted}>Build clear Rocks. Track them weekly.</div>
+              )}
+            </div>
+          </div>
+        )}
 
         {saveError && (
           <div style={styles.alert}>
@@ -608,7 +659,9 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
               <textarea
                 style={styles.textarea}
                 value={safeStr(rock?.suggestedImprovement)}
-                onChange={(e) => updateField("suggestedImprovement", e.target.value, { autosave: true })}
+                onChange={(e) =>
+                  updateField("suggestedImprovement", e.target.value, { autosave: true })
+                }
                 placeholder="AI suggestion will appear here after you click Improve with AI."
               />
               {aiError && <div style={styles.tinyError}>{aiError}</div>}
