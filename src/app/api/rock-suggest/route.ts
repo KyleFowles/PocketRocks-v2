@@ -1,4 +1,12 @@
-// src/app/api/rock-suggest/route.ts
+/* ============================================================
+   FILE: src/app/api/rock-suggest/route.ts
+
+   SCOPE:
+   AI Rock suggestions API (STABILITY HARDENED)
+   - Adds GET handler that returns 405 (prevents hanging curl requests)
+   - POST behavior unchanged
+   ============================================================ */
+
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -67,6 +75,15 @@ function int(v: unknown, fallback: number) {
 
 function clampCount(n: number) {
   return Math.min(6, Math.max(3, n));
+}
+
+/**
+ * IMPORTANT:
+ * Without a GET handler, curl GET requests can appear to "hang" if the client calls GET.
+ * This returns a fast, explicit 405 response to keep testing predictable.
+ */
+export async function GET() {
+  return NextResponse.json({ ok: false, error: "Method Not Allowed" }, { status: 405 });
 }
 
 export async function POST(req: Request) {
