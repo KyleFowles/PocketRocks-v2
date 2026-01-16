@@ -127,7 +127,7 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
   // Determine if doc is already created based on incoming data
   useEffect(() => {
     // If we have an initialRock with matching id and userId, assume it exists.
-    const hasDoc = !!initialRock && safeTrim(initialRock?.userId) && safeTrim(initialRock?.id || rockId);
+    const hasDoc = !!initialRock && !!safeTrim(initialRock?.userId) && !!safeTrim(initialRock?.id || rockId);
     createdRef.current = hasDoc;
   }, [initialRock, rockId]);
 
