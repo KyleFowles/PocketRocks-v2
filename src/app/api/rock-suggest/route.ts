@@ -1,227 +1,262 @@
-// src/app/api/rock-suggest/route.ts
+/* ============================================================
+   FILE: src/app/api/rock-suggest/route.ts
+
+   SCOPE:
+   Rock Suggest API — ALWAYS returns usable output (SMART skeleton fallback)
+   - Supports BOTH request shapes:
+
+     Legacy:
+       { title?, draft?, finalStatement?, dueDate?, status?, count? }
+
+     New:
+       { rock: { ...RockFields }, context?: { requested?: number } }
+
+   - Response (always):
+       { ok: true, suggestions: { text: string }[], mode: "ai" | "fallback" }
+
+   - Guarantees:
+     * If AI returns nothing (or errors), returns a SMART skeleton suggestion
+     * No empty suggestions array
+   ============================================================ */
+
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
+type Suggestion = { text: string };
+
+function safeStr(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (v === null || v === undefined) return "";
+  try {
+    return String(v);
+  } catch {
+    return "";
+  }
+}
+
+function safeTrim(v: unknown): string {
+  return safeStr(v).trim();
+}
+
+function pickRequestedCount(body: any): number {
+  const raw =
+    body?.context?.requested ??
+    body?.requested ??
+    body?.count ??
+    1;
+
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n)) return 1;
+  return Math.max(1, Math.min(5, Math.floor(n)));
+}
+
+function extractInputs(body: any): {
+  title: string;
+  draft: string;
+  dueDate: string;
+  finalStatement: string;
+} {
+  // New shape
+  const r = body?.rock ?? null;
+
+  const title = safeTrim(r?.title ?? body?.title);
+  const draft = safeTrim(r?.draft ?? body?.draft);
+  const dueDate = safeTrim(r?.dueDate ?? body?.dueDate);
+  const finalStatement = safeTrim(r?.finalStatement ?? body?.finalStatement);
+
+  return { title, draft, dueDate, finalStatement };
+}
+
 /**
- * This route supports BOTH request shapes:
- *
- * Legacy:
- *   { title, draft, finalStatement, dueDate, status, count }
- *
- * New:
- *   { rock: { ...RockFields }, context: { requested: number } }
- *
- * Response:
- *   { ok: true, suggestions: string[] }
+ * SMART skeleton that always gives the user a structured path forward,
+ * even if AI fails or returns empty.
  */
+function buildSmartSkeletonSuggestion(input: {
+  title: string;
+  draft: string;
+  dueDate: string;
+}): Suggestion {
+  const title = input.title || "Rock";
+  const draft = input.draft || "(add a plain-English draft statement)";
+  const due = input.dueDate || "[date]";
 
-type LegacyReqBody = {
-  title?: string;
-  draft?: string;
-  finalStatement?: string;
-  dueDate?: string;
-  status?: string;
-  count?: number;
-};
+  const text =
+`SMART Skeleton (auto-generated)
 
-type NewReqBody = {
-  rock?: {
-    title?: string;
-    draft?: string;
-    finalStatement?: string;
-    dueDate?: string;
-    status?: string;
+Rock Title:
+- ${title}
 
-    // Optional extra context fields
-    specific?: string;
-    measurable?: string;
-    achievable?: string;
-    relevant?: string;
-    timeBound?: string;
+Your Draft:
+- ${draft}
 
-    metrics?: Array<{ name?: string; target?: string; current?: string }>;
-    milestones?: Array<{ text?: string; dueDate?: string; completed?: boolean }>;
+S — Specific (what “done” looks like):
+- By ${due}, we will ________________________________.
+- Scope: ____________________ (what’s included / excluded)
+
+M — Measurable (how you’ll prove it):
+- Primary metric: ____________________ (number + unit)
+- Baseline today: ________   Target: ________
+- Scorecard cadence: Weekly
+
+A — Achievable (how you’ll get there):
+- Owner: ____________________
+- Resources/support needed: ____________________
+- Key constraints/risks: ____________________
+
+R — Relevant (why it matters):
+- This supports ____________________ (company goal / revenue / capacity / quality)
+- If we do nothing, the cost is ____________________
+
+T — Time-bound (when it’s due):
+- Due date: ${due}
+- Weekly check-in question: “Are we on track this week? Yes/No—why?”
+
+Suggested “Final Rock Statement” template:
+- By ${due}, ____________________ will ____________________ as measured by ____________________.
+
+Optional starter placeholders (use later steps):
+- Metrics (Step 3): ____________________ ; ____________________ ; ____________________
+- Milestones (Step 4): Week 2 ________ | Week 6 ________ | Week 10 ________ | Week 13 DONE`;
+
+  return { text };
+}
+
+function normalizeSuggestions(raw: any): Suggestion[] {
+  // Accept:
+  // - { suggestions: [...] }
+  // - [...]
+  // Where each item can be string or {text}
+  const arr = Array.isArray(raw?.suggestions)
+    ? raw.suggestions
+    : Array.isArray(raw)
+      ? raw
+      : [];
+
+  const out: Suggestion[] = [];
+  for (const item of arr) {
+    if (typeof item === "string") {
+      const t = safeTrim(item);
+      if (t) out.push({ text: t });
+      continue;
+    }
+    if (item && typeof item === "object") {
+      const t = safeTrim((item as any).text);
+      if (t) out.push({ text: t });
+    }
+  }
+  return out;
+}
+
+/**
+ * Best-effort AI call.
+ * - Uses dynamic import so builds won't fail if the "openai" package isn't installed.
+ * - If anything goes wrong, caller will fallback.
+ */
+async function getAiSuggestions(params: {
+  title: string;
+  draft: string;
+  dueDate: string;
+  requested: number;
+}): Promise<Suggestion[]> {
+  const apiKey = safeTrim(process.env.OPENAI_API_KEY);
+  if (!apiKey) return [];
+
+  let OpenAI: any;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    OpenAI = (await import("openai")).default;
+  } catch {
+    return [];
+  }
+
+  const client = new OpenAI({ apiKey });
+
+  const { title, draft, dueDate, requested } = params;
+
+  const userInput = {
+    title: title || "",
+    draft: draft || "",
+    dueDate: dueDate || "",
+    requested,
   };
-  context?: {
-    requested?: number;
-    mode?: string;
-  };
-  count?: number; // allow top-level count too
-};
 
-type ReqBody = LegacyReqBody & NewReqBody;
+  const system =
+`You are PocketRocks. Your job is to take vague EOS "Rock" inputs and return best-of-breed improvements.
 
-function jsonError(message: string, status = 400) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
+Requirements:
+- ALWAYS return JSON only (no markdown).
+- Output must be: { "suggestions": [ { "text": "..." }, ... ] }
+- Each "text" MUST include a SMART skeleton filled in as much as possible.
+- If details are missing, use clear placeholders like [metric], [date], [owner], etc.
+- Keep it concise, actionable, and friendly.`;
 
-function str(v: unknown) {
-  return typeof v === "string" ? v : "";
-}
+  const prompt =
+`Create ${requested} improved suggestions.
 
-function int(v: unknown, fallback: number) {
-  const n = typeof v === "number" ? v : parseInt(String(v ?? ""), 10);
-  return Number.isFinite(n) ? n : fallback;
-}
+Input:
+${JSON.stringify(userInput)}
 
-function clampCount(n: number) {
-  return Math.min(6, Math.max(3, n));
+Return JSON only.`;
+
+  // Pick a reasonable default model. If unavailable, the call will fail and we’ll fallback.
+  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+
+  const resp = await client.chat.completions.create({
+    model,
+    temperature: 0.4,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: prompt },
+    ],
+  });
+
+  const content = safeTrim(resp?.choices?.[0]?.message?.content);
+  if (!content) return [];
+
+  // Try JSON parse first
+  try {
+    const parsed = JSON.parse(content);
+    return normalizeSuggestions(parsed);
+  } catch {
+    // If the model returned plain text, treat it as a single suggestion.
+    return normalizeSuggestions([{ text: content }]);
+  }
 }
 
 export async function POST(req: Request) {
   try {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) return jsonError("Missing OPENAI_API_KEY on the server.", 500);
+    const body = await req.json().catch(() => ({}));
+    const { title, draft, dueDate } = extractInputs(body);
+    const requested = pickRequestedCount(body);
 
-    const body = (await req.json()) as ReqBody;
+    // 1) Try AI first
+    const ai = await getAiSuggestions({ title, draft, dueDate, requested });
 
-    // Support both payloads
-    const rockFromNew = body?.rock ?? null;
-
-    const title = str(rockFromNew?.title ?? body.title).trim();
-    const draft = str(rockFromNew?.draft ?? body.draft).trim();
-    const finalStatement = str(rockFromNew?.finalStatement ?? body.finalStatement).trim();
-    const dueDate = str(rockFromNew?.dueDate ?? body.dueDate).trim();
-    const status = str(rockFromNew?.status ?? body.status).trim();
-
-    const count = clampCount(int(body?.context?.requested, int(body.count, 4)));
-
-    // Optional extra context for better results
-    const specific = str(rockFromNew?.specific).trim();
-    const measurable = str(rockFromNew?.measurable).trim();
-    const achievable = str(rockFromNew?.achievable).trim();
-    const relevant = str(rockFromNew?.relevant).trim();
-    const timeBound = str(rockFromNew?.timeBound).trim();
-
-    const metrics = Array.isArray(rockFromNew?.metrics) ? rockFromNew!.metrics! : [];
-    const milestones = Array.isArray(rockFromNew?.milestones) ? rockFromNew!.milestones! : [];
-
-    const metricsLine =
-      metrics.length > 0
-        ? `Metrics: ${metrics
-            .map((m) => {
-              const n = str(m?.name).trim();
-              const t = str(m?.target).trim();
-              const c = str(m?.current).trim();
-              if (!n && !t) return "";
-              return `${n || "Metric"} (Target: ${t || "—"}${c ? `, Current: ${c}` : ""})`;
-            })
-            .filter(Boolean)
-            .join("; ")}`
-        : "";
-
-    const milestonesLine =
-      milestones.length > 0
-        ? `Milestones: ${milestones
-            .map((m) => {
-              const text = str(m?.text).trim();
-              const dd = str(m?.dueDate).trim();
-              if (!text) return "";
-              return `${text}${dd ? ` (${dd})` : ""}`;
-            })
-            .filter(Boolean)
-            .join("; ")}`
-        : "";
-
-    const smartLine =
-      [specific, measurable, achievable, relevant, timeBound].some(Boolean)
-        ? [
-            specific ? `Specific: ${specific}` : "",
-            measurable ? `Measurable: ${measurable}` : "",
-            achievable ? `Achievable: ${achievable}` : "",
-            relevant ? `Relevant: ${relevant}` : "",
-            timeBound ? `Time-bound: ${timeBound}` : "",
-          ]
-            .filter(Boolean)
-            .join(" | ")
-        : "";
-
-    const context = [
-      title ? `Title: ${title}` : "",
-      status ? `Status: ${status}` : "",
-      dueDate ? `Due Date: ${dueDate}` : "",
-      draft ? `Draft: ${draft}` : "",
-      finalStatement ? `Current Final Statement: ${finalStatement}` : "",
-      smartLine ? `SMART: ${smartLine}` : "",
-      metricsLine ? metricsLine : "",
-      milestonesLine ? milestonesLine : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-    if (!context) {
-      return jsonError("No Rock context provided. Send at least title/draft/finalStatement.", 400);
+    if (ai.length > 0) {
+      return NextResponse.json({ ok: true, mode: "ai", suggestions: ai.slice(0, requested) });
     }
 
-    const prompt = `
-You help a user turn a Rock into a SMART Rock final statement.
+    // 2) Guaranteed fallback (SMART skeleton)
+    const fallback = buildSmartSkeletonSuggestion({ title, draft, dueDate });
 
-Task:
-- Write ${count} improved Final Rock Statement options.
-
-Rules:
-- Each option must be ONE sentence.
-- Clear, measurable, and outcome-based.
-- Avoid filler words.
-- Keep it concise (ideally <= 20 words).
-- Do not include numbering or extra commentary.
-- Return ONLY valid JSON with this exact shape:
-{"suggestions":["...","..."]}
-
-Rock context:
-${context}
-`.trim();
-
-    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-
-    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0.4,
-        messages: [
-          { role: "system", content: "Return only valid JSON. No markdown. No extra text." },
-          { role: "user", content: prompt },
-        ],
-      }),
+    return NextResponse.json({
+      ok: true,
+      mode: "fallback",
+      suggestions: [fallback],
     });
-
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => "");
-      return jsonError(`OpenAI request failed (${resp.status}). ${text.slice(0, 300)}`, 500);
-    }
-
-    const data = (await resp.json()) as any;
-    const content = data?.choices?.[0]?.message?.content;
-
-    if (!content || typeof content !== "string") {
-      return jsonError("OpenAI returned no content.", 500);
-    }
-
-    let parsed: any;
-    try {
-      parsed = JSON.parse(content);
-    } catch {
-      return jsonError(`Model did not return valid JSON. Received: ${content.slice(0, 300)}`, 500);
-    }
-
-    const raw = Array.isArray(parsed?.suggestions) ? parsed.suggestions : [];
-    const suggestions = raw
-      .map((s: any) => (typeof s === "string" ? s.trim() : ""))
-      .filter(Boolean)
-      .slice(0, count);
-
-    if (!suggestions.length) {
-      return jsonError("No suggestions returned.", 500);
-    }
-
-    return NextResponse.json({ ok: true, suggestions });
   } catch (e: any) {
-    return jsonError(e?.message || "Unexpected server error.", 500);
+    // Even on unexpected server errors, still return a usable skeleton.
+    const fallback = buildSmartSkeletonSuggestion({ title: "", draft: "", dueDate: "" });
+
+    return NextResponse.json(
+      {
+        ok: true,
+        mode: "fallback",
+        suggestions: [fallback],
+        error: safeTrim(e?.message) || "Unknown error",
+      },
+      { status: 200 }
+    );
   }
 }
