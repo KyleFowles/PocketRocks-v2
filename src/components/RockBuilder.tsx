@@ -392,9 +392,9 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
       if (!aliveRef.current) return;
 
       setSaveState("failed");
-      setSaveError(e?.message || "AI suggestions are temporarily unavailable.");
-      setAiError(e?.message || "AI suggestions are temporarily unavailable.");
-      setDraftBanner({ kind: "error", text: e?.message || "AI suggestions are temporarily unavailable." });
+      setSaveError(e?.message || "AI needs more information — here’s a SMART starter framework to help you.");
+      setAiError(e?.message || "AAI needs more information — here’s a SMART starter framework to help you.");
+      setDraftBanner({ kind: "error", text: e?.message || "AI needs more information — here’s a SMART starter framework to help you." });
     } finally {
       if (aliveRef.current) setAiLoading(false);
     }
