@@ -247,7 +247,7 @@ const alertWarn: React.CSSProperties = {
   maxWidth: 980,
   padding: 18,
   borderRadius: 18,
-  borderA: "1px solid rgba(255,200,80,0.35)",
+  border: "1px solid rgba(255,200,80,0.35)",
   background: "rgba(255,200,80,0.10)",
 };
 
