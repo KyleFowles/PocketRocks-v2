@@ -8,7 +8,7 @@
    ============================================================ */
 
 import React from "react";
-import type { Step } from "@/components/rockBuilder/types";
+import type { Step } from "./types";
 
 export function stepName(step: Step) {
   switch (step) {

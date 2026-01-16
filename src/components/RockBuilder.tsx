@@ -29,73 +29,16 @@ import StepMetrics from "@/components/rock/StepMetrics";
 import StepMilestones from "@/components/rock/StepMilestones";
 import { createRockWithId, updateRock } from "@/lib/rocks";
 
-type Step = 1 | 2 | 3 | 4 | 5;
-
-type Props = {
-  uid: string;
-  rockId: string;
-  initialRock: any;
-};
-
-type BannerMsg = { kind: "error" | "ok"; text: string } | null;
-
-type AiSuggestion = {
-  id?: string;
-  text?: string;
-  recommended?: boolean;
-};
-
-function safeStr(v: any): string {
-  if (typeof v === "string") return v;
-  if (v === null || v === undefined) return "";
-  try {
-    return String(v);
-  } catch {
-    return "";
-  }
-}
-
-function safeTrim(v: any): string {
-  return safeStr(v).trim();
-}
-
-function clampStep(v: any): Step {
-  const n = typeof v === "number" ? v : Number(v);
-  if (n === 2) return 2;
-  if (n === 3) return 3;
-  if (n === 4) return 4;
-  if (n === 5) return 5;
-  return 1;
-}
-
-function stripUndefinedDeep(input: any): any {
-  if (input === undefined) return undefined;
-  if (Array.isArray(input)) return input.map(stripUndefinedDeep).filter((x) => x !== undefined);
-  if (input && typeof input === "object") {
-    const out: any = {};
-    for (const [k, v] of Object.entries(input)) {
-      const cleaned = stripUndefinedDeep(v);
-      if (cleaned !== undefined) out[k] = cleaned;
-    }
-    return out;
-  }
-  return input;
-}
-
-function devError(...args: any[]) {
-  if (process.env.NODE_ENV !== "production") {
-    // eslint-disable-next-line no-console
-    console.error(...args);
-  }
-}
-
-function stableStringify(obj: any) {
-  try {
-    return JSON.stringify(obj, Object.keys(obj || {}).sort());
-  } catch {
-    return "";
-  }
-}
+import type { AiSuggestion, BannerMsg, Props, Step } from "./rockBuilder/types";
+import {
+  clampStep,
+  devError,
+  safeStr,
+  safeTrim,
+  stableStringify,
+  stripUndefinedDeep,
+} from "./rockBuilder/utils";
+import { stepName, styles } from "./rockBuilder/uiStyles";
 
 export default function RockBuilder({ uid, rockId, initialRock }: Props) {
   // -----------------------------------------
@@ -183,9 +126,7 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
   // Determine whether we likely already have a doc
   useEffect(() => {
     const hasDoc =
-      !!initialRock &&
-      !!safeTrim(initialRock?.userId) &&
-      !!safeTrim(initialRock?.id || rockId);
+      !!initialRock && !!safeTrim(initialRock?.userId) && !!safeTrim(initialRock?.id || rockId);
 
     createdRef.current = !!hasDoc;
   }, [initialRock, rockId]);
@@ -220,9 +161,9 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
       step: clampStep(baseData?.step),
       title: safeStr(baseData?.title ?? rock?.title),
       draft: safeStr(baseData?.draft ?? rock?.draft),
-      metrics: Array.isArray(baseData?.metrics ?? rock?.metrics) ? (baseData?.metrics ?? rock?.metrics) : [],
+      metrics: Array.isArray(baseData?.metrics ?? rock?.metrics) ? baseData?.metrics ?? rock?.metrics : [],
       milestones: Array.isArray(baseData?.milestones ?? rock?.milestones)
-        ? (baseData?.milestones ?? rock?.milestones)
+        ? baseData?.milestones ?? rock?.milestones
         : [],
     });
 
@@ -437,15 +378,9 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
       const top = safeTrim(suggestions?.[0]?.text);
       if (!top) throw new Error("AI did not return a suggestion.");
 
-      setRock((prev: any) => ({
-        ...(prev || {}),
-        suggestedImprovement: top,
-      }));
+      setRock((prev: any) => ({ ...(prev || {}), suggestedImprovement: top }));
 
-      await persistPatchNow({
-        suggestedImprovement: top,
-        step: 5,
-      });
+      await persistPatchNow({ suggestedImprovement: top, step: 5 });
 
       if (!aliveRef.current) return;
 
@@ -459,10 +394,7 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
       setSaveState("failed");
       setSaveError(e?.message || "AI suggestions are temporarily unavailable.");
       setAiError(e?.message || "AI suggestions are temporarily unavailable.");
-      setDraftBanner({
-        kind: "error",
-        text: e?.message || "AI suggestions are temporarily unavailable.",
-      });
+      setDraftBanner({ kind: "error", text: e?.message || "AI suggestions are temporarily unavailable." });
     } finally {
       if (aliveRef.current) setAiLoading(false);
     }
@@ -513,15 +445,9 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
       const top = safeTrim(suggestions?.[0]?.text);
       if (!top) throw new Error("AI did not return a suggestion.");
 
-      setRock((prev: any) => ({
-        ...(prev || {}),
-        suggestedImprovement: top,
-      }));
+      setRock((prev: any) => ({ ...(prev || {}), suggestedImprovement: top }));
 
-      await persistPatchNow({
-        suggestedImprovement: top,
-        step: 5,
-      });
+      await persistPatchNow({ suggestedImprovement: top, step: 5 });
 
       if (!aliveRef.current) return;
 
@@ -576,9 +502,7 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
     }
 
     if (step === 5) {
-      if (!hasAiSuggestion) {
-        await improveWithAiFromReview();
-      }
+      if (!hasAiSuggestion) await improveWithAiFromReview();
       return;
     }
 
@@ -597,63 +521,51 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
   // -----------------------------------------
 
   return (
-    <div style={page}>
-      <div style={topBar}>
+    <div style={styles.page}>
+      <div style={styles.topBar}>
         <div>
-          <div style={brandRow}>
-            <span style={brandOrange}>Pocket</span>
-            <span style={brandWhite}>Rocks</span>
+          <div style={styles.brandRow}>
+            <span style={styles.brandOrange}>Pocket</span>
+            <span style={styles.brandWhite}>Rocks</span>
           </div>
-          <div style={crumb}>ROCK · {stepName(step)}</div>
+          <div style={styles.crumb}>ROCK · {stepName(step)}</div>
         </div>
 
-        <div style={savePillWrap}>
-          {saveState === "saving" && <div style={pill}>Saving…</div>}
-          {saveState === "saved" && <div style={{ ...pill, opacity: 0.85 }}>Saved</div>}
-          {saveState === "failed" && <div style={{ ...pill, ...pillFail }}>Save failed</div>}
+        <div style={styles.savePillWrap}>
+          {saveState === "saving" && <div style={styles.pill}>Saving…</div>}
+          {saveState === "saved" && <div style={{ ...styles.pill, opacity: 0.85 }}>Saved</div>}
+          {saveState === "failed" && <div style={{ ...styles.pill, ...styles.pillFail }}>Save failed</div>}
         </div>
       </div>
 
-      <div style={card}>
-        <div style={cardHdr}>
+      <div style={styles.card}>
+        <div style={styles.cardHdr}>
           <div>
-            <div style={eyebrow}>{stepName(step)}</div>
-            <div style={h1}>{title}</div>
-            {draft ? (
-              <div style={sub}>{draft}</div>
-            ) : (
-              <div style={subMuted}>Build clear Rocks. Track them weekly.</div>
-            )}
+            <div style={styles.eyebrow}>{stepName(step)}</div>
+            <div style={styles.h1}>{title}</div>
+            {draft ? <div style={styles.sub}>{draft}</div> : <div style={styles.subMuted}>Build clear Rocks. Track them weekly.</div>}
           </div>
         </div>
 
         {saveError && (
-          <div style={alert}>
-            <div style={alertTitle}>Heads up</div>
-            <div style={alertBody}>{saveError}</div>
+          <div style={styles.alert}>
+            <div style={styles.alertTitle}>Heads up</div>
+            <div style={styles.alertBody}>{saveError}</div>
           </div>
         )}
 
-        {/* ======================================================
-            STEP 1 — DRAFT (NO AUTOSAVE WHILE TYPING)
-           ====================================================== */}
         {step === 1 && (
           <StepDraft
             rock={rock}
-            onChange={(next) => {
-              setRock(next);
-            }}
+            onChange={(next) => setRock(next)}
             saving={saveState === "saving" || aiLoading}
             saved={saveState === "saved"}
             banner={draftBanner}
-            canInteract={canDraftInteract && !aiLoading}
+            canInteract={!!safeTrim(uid) && !!safeTrim(rockId) && !aiLoading}
             onImproveWithAI={improveWithAiOption3}
           />
         )}
 
-        {/* ======================================================
-            STEP 2 — SMART (autosave OK)
-           ====================================================== */}
         {step === 2 && (
           <StepSmart
             rock={rock}
@@ -662,9 +574,6 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
           />
         )}
 
-        {/* ======================================================
-            STEP 3 — METRICS (autosave OK)
-           ====================================================== */}
         {step === 3 && (
           <StepMetrics
             value={safeStr(rock?.metricsText)}
@@ -672,9 +581,6 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
           />
         )}
 
-        {/* ======================================================
-            STEP 4 — MILESTONES (autosave OK) ✅ MOVED OUT
-           ====================================================== */}
         {step === 4 && (
           <StepMilestones
             value={safeStr(rock?.milestonesText)}
@@ -682,45 +588,39 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
           />
         )}
 
-        {/* ======================================================
-            STEP 5 — REVIEW + AI (autosave OK)
-           ====================================================== */}
         {step === 5 && (
-          <div style={section}>
-            <div style={sectionTitle}>Step 5 — Review + AI</div>
-            <div style={sectionHint}>Review your Rock. Your AI suggestion (if any) is here.</div>
+          <div style={styles.section}>
+            <div style={styles.sectionTitle}>Step 5 — Review + AI</div>
+            <div style={styles.sectionHint}>Review your Rock. Your AI suggestion (if any) is here.</div>
 
-            <label style={label}>
-              <div style={labelText}>Final Rock statement</div>
+            <label style={styles.label}>
+              <div style={styles.labelText}>Final Rock statement</div>
               <textarea
-                style={textarea}
+                style={styles.textarea}
                 value={safeStr(rock?.finalStatement)}
                 onChange={(e) => updateField("finalStatement", e.target.value, { autosave: true })}
                 placeholder="This is what you’ll share with your leadership team."
               />
             </label>
 
-            <label style={label}>
-              <div style={labelText}>Suggested Improvement (from AI)</div>
+            <label style={styles.label}>
+              <div style={styles.labelText}>Suggested Improvement (from AI)</div>
               <textarea
-                style={textarea}
+                style={styles.textarea}
                 value={safeStr(rock?.suggestedImprovement)}
                 onChange={(e) => updateField("suggestedImprovement", e.target.value, { autosave: true })}
                 placeholder="AI suggestion will appear here after you click Improve with AI."
               />
-              {aiError && <div style={tinyError}>{aiError}</div>}
-              <div style={tip}>Tip: Keep it simple. Make it clearer, not perfect.</div>
+              {aiError && <div style={styles.tinyError}>{aiError}</div>}
+              <div style={styles.tip}>Tip: Keep it simple. Make it clearer, not perfect.</div>
             </label>
           </div>
         )}
 
-        {/* ======================================================
-            FOOTER — ONLY NAVIGATION (TWO BUTTONS)
-           ====================================================== */}
-        <div style={footer}>
-          <div style={footerLeft}>Step {step} of 5</div>
+        <div style={styles.footer}>
+          <div style={styles.footerLeft}>Step {step} of 5</div>
 
-          <div style={footerRight}>
+          <div style={styles.footerRight}>
             <Button type="button" onClick={prevStep} disabled={step === 1}>
               Back
             </Button>
@@ -734,227 +634,3 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
     </div>
   );
 }
-
-/* -----------------------------
-   Labels
------------------------------- */
-
-function stepName(step: Step) {
-  switch (step) {
-    case 1:
-      return "DRAFT";
-    case 2:
-      return "SMART";
-    case 3:
-      return "METRICS";
-    case 4:
-      return "MILESTONES";
-    case 5:
-      return "REVIEW + AI";
-  }
-}
-
-/* -----------------------------
-   Styles
------------------------------- */
-
-const page: React.CSSProperties = {
-  minHeight: "100vh",
-  padding: "22px",
-  background:
-    "radial-gradient(1000px 520px at 20% 20%, rgba(60,130,255,0.20), transparent 60%), radial-gradient(900px 480px at 70% 30%, rgba(255,120,0,0.12), transparent 60%), #050812",
-  color: "rgba(255,255,255,0.92)",
-};
-
-const topBar: React.CSSProperties = {
-  maxWidth: 1100,
-  margin: "0 auto",
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "flex-start",
-  gap: 16,
-};
-
-const brandRow: React.CSSProperties = {
-  display: "flex",
-  alignItems: "baseline",
-  gap: 0,
-  lineHeight: 1,
-};
-
-const brandOrange: React.CSSProperties = {
-  fontSize: 30,
-  fontWeight: 900,
-  color: "#FF7900",
-  letterSpacing: -0.3,
-};
-
-const brandWhite: React.CSSProperties = {
-  fontSize: 30,
-  fontWeight: 900,
-  color: "rgba(255,255,255,0.92)",
-  letterSpacing: -0.3,
-};
-
-const crumb: React.CSSProperties = {
-  marginTop: 6,
-  fontSize: 12,
-  letterSpacing: 2.5,
-  opacity: 0.55,
-};
-
-const savePillWrap: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 10,
-  marginTop: 6,
-};
-
-const pill: React.CSSProperties = {
-  padding: "8px 12px",
-  borderRadius: 999,
-  fontSize: 13,
-  fontWeight: 800,
-  border: "1px solid rgba(255,255,255,0.14)",
-  background: "rgba(255,255,255,0.08)",
-};
-
-const pillFail: React.CSSProperties = {
-  border: "1px solid rgba(255,80,80,0.35)",
-  background: "rgba(255,80,80,0.12)",
-};
-
-const card: React.CSSProperties = {
-  maxWidth: 1100,
-  margin: "18px auto 0",
-  borderRadius: 26,
-  border: "1px solid rgba(255,255,255,0.10)",
-  background: "rgba(0,0,0,0.28)",
-  overflow: "hidden",
-  boxShadow: "0 20px 70px rgba(0,0,0,0.35)",
-};
-
-const cardHdr: React.CSSProperties = {
-  padding: "18px 18px 10px",
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 16,
-  flexWrap: "wrap",
-  alignItems: "flex-start",
-};
-
-const eyebrow: React.CSSProperties = {
-  fontSize: 12,
-  letterSpacing: 3,
-  opacity: 0.6,
-  marginBottom: 4,
-};
-
-const h1: React.CSSProperties = {
-  fontSize: 30,
-  fontWeight: 900,
-  letterSpacing: -0.4,
-};
-
-const sub: React.CSSProperties = {
-  marginTop: 6,
-  opacity: 0.75,
-};
-
-const subMuted: React.CSSProperties = {
-  marginTop: 6,
-  opacity: 0.6,
-};
-
-const alert: React.CSSProperties = {
-  margin: "0 18px 10px",
-  padding: 16,
-  borderRadius: 18,
-  border: "1px solid rgba(255,80,80,0.35)",
-  background: "rgba(255,80,80,0.10)",
-};
-
-const alertTitle: React.CSSProperties = {
-  fontSize: 18,
-  fontWeight: 900,
-  marginBottom: 6,
-};
-
-const alertBody: React.CSSProperties = {
-  fontSize: 14,
-  opacity: 0.9,
-};
-
-const section: React.CSSProperties = {
-  padding: "14px 18px 18px",
-  display: "grid",
-  gap: 14,
-};
-
-const sectionTitle: React.CSSProperties = {
-  fontSize: 22,
-  fontWeight: 900,
-};
-
-const sectionHint: React.CSSProperties = {
-  marginTop: 6,
-  fontSize: 14,
-  opacity: 0.7,
-};
-
-const label: React.CSSProperties = {
-  display: "grid",
-  gap: 8,
-};
-
-const labelText: React.CSSProperties = {
-  fontSize: 14,
-  fontWeight: 800,
-  opacity: 0.85,
-};
-
-const textarea: React.CSSProperties = {
-  width: "100%",
-  minHeight: 120,
-  borderRadius: 16,
-  padding: "12px 14px",
-  background: "rgba(255,255,255,0.06)",
-  border: "1px solid rgba(255,255,255,0.14)",
-  color: "rgba(255,255,255,0.95)",
-  fontSize: 16,
-  outline: "none",
-  whiteSpace: "pre-wrap",
-};
-
-const tip: React.CSSProperties = {
-  marginTop: 6,
-  fontSize: 13,
-  opacity: 0.6,
-};
-
-const tinyError: React.CSSProperties = {
-  marginTop: 8,
-  fontSize: 13,
-  fontWeight: 800,
-  color: "rgba(255,140,140,0.95)",
-};
-
-const footer: React.CSSProperties = {
-  padding: "14px 18px",
-  borderTop: "1px solid rgba(255,255,255,0.08)",
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: 12,
-  flexWrap: "wrap",
-};
-
-const footerLeft: React.CSSProperties = {
-  fontSize: 13,
-  opacity: 0.65,
-};
-
-const footerRight: React.CSSProperties = {
-  display: "flex",
-  gap: 10,
-};
