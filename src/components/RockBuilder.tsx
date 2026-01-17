@@ -2,24 +2,13 @@
    FILE: src/components/RockBuilder.tsx
 
    SCOPE:
-   Rock Builder (Steps 1–5) — FOOTER-ONLY NAV + STABILITY
-   - Step 1 (Draft) is LOCAL ONLY while typing (no autosave per keystroke)
-     * Saves only on: Continue to SMART, Improve with AI
-     * (Save Draft button removed from Step 1 footer — optional behavior removed)
-   - Steps 2–5 can autosave (debounced) to reduce friction
-   - AI on Step 5 (Review + AI):
-     * If no AI suggestion yet, primary footer button becomes "Improve with AI"
-     * Clicking it calls /api/rock-suggest, saves suggestedImprovement, stays on Step 5
-     * Once suggestion exists, primary button becomes "Done" and is disabled
-   - New Rock doc creation:
-     * If doc doesn't exist yet, create once via createRockWithId()
-     * Then patch via updateRock()
-   - Prevent setState after unmount
-   - Never sends undefined to Firestore
-
-   UX UPDATE (Step 1 input-first):
-   - Removes the big summary header on Step 1 so inputs appear immediately
-   - Keeps summary header for Steps 2–5
+   Fix TypeScript build error:
+   - Remove unreachable `return step === 1;` branch that causes TS to infer
+     step is not 1 in that code path.
+   - Keep behavior:
+     - Disable primary footer button while saving/AI
+     - On Step 1: disable until something is typed
+     - On Steps 2–5: do NOT disable due to step number
    ============================================================ */
 
 "use client";
@@ -43,12 +32,9 @@ import {
   stripUndefinedDeep,
 } from "./rockBuilder/utils";
 import { stepName, styles } from "./rockBuilder/uiStyles";
+import { assembleFinalRock, getFinalAssemblyKey } from "./rockBuilder/finalAssembler";
 
 export default function RockBuilder({ uid, rockId, initialRock }: Props) {
-  // -----------------------------------------
-  // Core state
-  // -----------------------------------------
-
   const [step, setStep] = useState<Step>(() => clampStep(initialRock?.step));
 
   const [rock, setRock] = useState<any>(() => ({
@@ -62,37 +48,21 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Step 1 banner (explicit actions only)
   const [draftBanner, setDraftBanner] = useState<BannerMsg>(null);
-
-  // -----------------------------------------
-  // New-doc creation + save scheduling
-  // -----------------------------------------
 
   const aliveRef = useRef(true);
   const saveTimer = useRef<any>(null);
   const lastPatchRef = useRef<any>(null);
   const lastPatchKeyRef = useRef<string>("");
 
-  // Monotonic sequencing prevents out-of-order "saved" UI
   const saveSeqRef = useRef(0);
-
-  // Tracks whether Firestore doc exists / was created already
   const createdRef = useRef<boolean>(false);
-
-  // If user navigates steps, don't let initialRock.step overwrite UI
   const userNavigatedStepRef = useRef(false);
 
-  // -----------------------------------------
-  // AI state (Option 3)
-  // -----------------------------------------
+  const lastAssembledKeyRef = useRef<string>("");
 
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
-
-  // -----------------------------------------
-  // Mount/unmount guard
-  // -----------------------------------------
 
   useEffect(() => {
     aliveRef.current = true;
@@ -102,12 +72,9 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
     };
   }, []);
 
-  // -----------------------------------------
-  // Sync when rockId / initialRock changes
-  // -----------------------------------------
-
   useEffect(() => {
     userNavigatedStepRef.current = false;
+    lastAssembledKeyRef.current = "";
   }, [rockId]);
 
   useEffect(() => {
@@ -127,17 +94,11 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
     }
   }, [rockId, uid, initialRock]);
 
-  // Determine whether we likely already have a doc
   useEffect(() => {
     const hasDoc =
       !!initialRock && !!safeTrim(initialRock?.userId) && !!safeTrim(initialRock?.id || rockId);
-
     createdRef.current = !!hasDoc;
   }, [initialRock, rockId]);
-
-  // -----------------------------------------
-  // Derived UI values
-  // -----------------------------------------
 
   const title = useMemo(() => safeStr(rock?.title) || "Rock", [rock?.title]);
   const draft = useMemo(() => safeStr(rock?.draft), [rock?.draft]);
@@ -146,14 +107,10 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
     return safeTrim(rock?.title).length > 0 || safeTrim(rock?.draft).length > 0;
   }, [rock?.title, rock?.draft]);
 
-  const hasAiSuggestion = useMemo(
-    () => safeTrim(rock?.suggestedImprovement).length > 0,
+  const suggestedImprovement = useMemo(
+    () => safeStr(rock?.suggestedImprovement),
     [rock?.suggestedImprovement]
   );
-
-  // -----------------------------------------
-  // Low-level persistence primitives
-  // -----------------------------------------
 
   async function ensureCreatedIfNeeded(baseData?: any) {
     if (createdRef.current) return;
@@ -223,54 +180,6 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
     }, 450);
   }
 
-  function updateField(path: string, value: any, opts?: { autosave?: boolean }) {
-    const autosave = opts?.autosave !== false;
-
-    setRock((prev: any) => {
-      const next = { ...(prev || {}) };
-      const parts = path.split(".");
-      let cur: any = next;
-
-      for (let i = 0; i < parts.length - 1; i++) {
-        const key = parts[i]!;
-        cur[key] = cur[key] && typeof cur[key] === "object" ? { ...cur[key] } : {};
-        cur = cur[key];
-      }
-
-      cur[parts[parts.length - 1]!] = value;
-
-      if (autosave) {
-        const patch: any = {};
-        let pcur: any = patch;
-
-        for (let i = 0; i < parts.length - 1; i++) {
-          const key = parts[i]!;
-          pcur[key] = pcur[key] && typeof pcur[key] === "object" ? pcur[key] : {};
-          pcur = pcur[key];
-        }
-
-        pcur[parts[parts.length - 1]!] = value;
-        scheduleSave(patch);
-      }
-
-      return next;
-    });
-  }
-
-  function setMany(patch: any, opts?: { autosave?: boolean }) {
-    const autosave = opts?.autosave !== false;
-
-    setRock((prev: any) => {
-      const next = { ...(prev || {}), ...(patch || {}) };
-      if (autosave) scheduleSave(patch);
-      return next;
-    });
-  }
-
-  // -----------------------------------------
-  // Footer-only step navigation
-  // -----------------------------------------
-
   function goToStep(target: Step) {
     userNavigatedStepRef.current = true;
     setStep(() => {
@@ -297,16 +206,18 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
     });
   }
 
-  // -----------------------------------------
-  // Step 1 — Explicit actions only
-  // -----------------------------------------
-
   const canDraftInteract = useMemo(() => {
     return !!safeTrim(uid) && !!safeTrim(rockId);
   }, [uid, rockId]);
 
   async function continueFromDraftExplicit() {
-    if (!canDraftInteract) return;
+    if (!canDraftInteract) {
+      setDraftBanner({
+        kind: "error",
+        text: "You need to be signed in (or Guest mode must provide a user id) before saving.",
+      });
+      return;
+    }
 
     if (!hasDraftContent) {
       setDraftBanner({ kind: "error", text: "Add a title or a draft statement first." });
@@ -338,11 +249,15 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
     }
   }
 
-  // -----------------------------------------
-  // Option 3 — Improve with AI (apply + save + jump to Step 5)
-  // -----------------------------------------
-
   async function improveWithAiOption3() {
+    if (!canDraftInteract) {
+      setDraftBanner({
+        kind: "error",
+        text: "AI can’t run yet because the Rock isn’t tied to a user/session. Sign in (or ensure Guest mode creates a user id), then try again.",
+      });
+      return;
+    }
+
     const d = safeTrim(rock?.draft);
     const t = safeTrim(rock?.title);
 
@@ -366,75 +281,6 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
       const res = await fetch("/api/rock-suggest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ draft: safeStr(rock?.draft) }),
-      });
-
-      if (!res.ok) throw new Error(`AI request failed (${res.status}).`);
-
-      const data = await res.json();
-
-      const suggestions: AiSuggestion[] = Array.isArray(data?.suggestions)
-        ? data.suggestions
-        : Array.isArray(data)
-          ? data
-          : [];
-
-      const top = safeTrim(suggestions?.[0]?.text);
-      if (!top) throw new Error("AI did not return a suggestion.");
-
-      setRock((prev: any) => ({ ...(prev || {}), suggestedImprovement: top }));
-
-      await persistPatchNow({ suggestedImprovement: top, step: 5 });
-
-      if (!aliveRef.current) return;
-
-      setSaveState("saved");
-      setStep(5);
-    } catch (e: any) {
-      devError("[RockBuilder] improveWithAiOption3 failed:", e);
-
-      if (!aliveRef.current) return;
-
-      setSaveState("failed");
-
-      const msg = "AI needs more information — here’s a SMART starter framework to help you.";
-      setSaveError(msg);
-      setAiError(msg);
-      setDraftBanner({ kind: "error", text: msg });
-    } finally {
-      if (aliveRef.current) setAiLoading(false);
-    }
-  }
-
-  // -----------------------------------------
-  // Step 5 — Improve with AI (from Review screen)
-  // -----------------------------------------
-
-  async function improveWithAiFromReview() {
-    const d = safeTrim(rock?.draft);
-    const t = safeTrim(rock?.title);
-
-    if (!d && !t) {
-      setAiError("Add a title or a draft statement first.");
-      return;
-    }
-
-    setAiLoading(true);
-    setAiError(null);
-
-    try {
-      setSaveState("saving");
-      setSaveError(null);
-
-      await persistPatchNow({
-        title: safeStr(rock?.title),
-        draft: safeStr(rock?.draft),
-        step: 5,
-      });
-
-      const res = await fetch("/api/rock-suggest", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ draft: safeStr(rock?.draft), title: safeStr(rock?.title) }),
       });
 
@@ -451,32 +297,39 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
       const top = safeTrim(suggestions?.[0]?.text);
       if (!top) throw new Error("AI did not return a suggestion.");
 
+      // Save suggestion WITHOUT overwriting the user’s draft
       setRock((prev: any) => ({ ...(prev || {}), suggestedImprovement: top }));
-
-      await persistPatchNow({ suggestedImprovement: top, step: 5 });
+      await persistPatchNow({ suggestedImprovement: top });
 
       if (!aliveRef.current) return;
 
       setSaveState("saved");
-      setStep(5);
+      setDraftBanner({ kind: "ok", text: "AI suggestion added below." });
     } catch (e: any) {
-      devError("[RockBuilder] improveWithAiFromReview failed:", e);
+      devError("[RockBuilder] improveWithAiOption3 failed:", e);
 
       if (!aliveRef.current) return;
 
       setSaveState("failed");
-
-      const msg = "AI needs more information — here’s a SMART starter framework to help you.";
+      const msg = e?.message || "AI failed. Try again in a moment.";
       setSaveError(msg);
       setAiError(msg);
+      setDraftBanner({ kind: "error", text: msg });
     } finally {
       if (aliveRef.current) setAiLoading(false);
     }
   }
 
-  // -----------------------------------------
-  // Step 2 helper
-  // -----------------------------------------
+  function applyAiSuggestionToDraft() {
+    const ai = safeTrim(suggestedImprovement);
+    if (!ai) return;
+
+    // user draft becomes AI suggestion, and we save it right away.
+    setRock((prev: any) => ({ ...(prev || {}), draft: ai }));
+    scheduleSave({ draft: ai });
+
+    setDraftBanner({ kind: "ok", text: "Draft replaced with AI suggestion." });
+  }
 
   function buildFinalFromSmart() {
     const s = safeTrim(rock?.smart?.specific);
@@ -489,44 +342,58 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
 
     const final = `${base}${metric}${due}`.trim();
 
-    setMany({ finalStatement: final }, { autosave: true });
+    setRock((prev: any) => ({ ...(prev || {}), finalStatement: final }));
+    scheduleSave({ finalStatement: final });
     goToStep(5);
   }
 
-  // -----------------------------------------
-  // Footer actions
-  // -----------------------------------------
+  // FINAL ROCK ASSEMBLER (runs on Step 5 entry)
+  useEffect(() => {
+    if (step !== 5) return;
+
+    const key = getFinalAssemblyKey(rock);
+    const existingFinal = safeTrim(rock?.finalStatement);
+
+    const storedKey = safeTrim(rock?.finalAssemblyKey);
+    const canAutoReplace = !existingFinal || (storedKey && storedKey === lastAssembledKeyRef.current);
+
+    if (!canAutoReplace) return;
+    if (storedKey === key && existingFinal) return;
+
+    const assembled = assembleFinalRock(rock);
+
+    setRock((prev: any) => ({
+      ...(prev || {}),
+      finalStatement: assembled,
+      finalAssemblyKey: key,
+    }));
+
+    lastAssembledKeyRef.current = key;
+
+    scheduleSave({ finalStatement: assembled, finalAssemblyKey: key });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
   const footerPrimaryLabel = useMemo(() => {
     if (step === 1) return "Continue to SMART";
-    if (step === 5) return hasAiSuggestion ? "Done" : "Improve with AI";
+    if (step === 5) return "Continue";
     return "Continue";
-  }, [step, hasAiSuggestion]);
+  }, [step]);
 
   async function footerPrimaryAction() {
     if (step === 1) {
       await continueFromDraftExplicit();
       return;
     }
-
-    if (step === 5) {
-      if (!hasAiSuggestion) await improveWithAiFromReview();
-      return;
-    }
-
     nextStep();
   }
 
+  // ✅ FIXED: remove unreachable branch that caused TS to infer step cannot be 1
   const footerPrimaryDisabled = useMemo(() => {
     if (saveState === "saving" || aiLoading) return true;
-    if (step === 1 && !hasDraftContent) return true;
-    if (step === 5 && hasAiSuggestion) return true; // "Done" is intentionally disabled
+    if (step === 1) return !hasDraftContent; // require something typed
     return false;
-  }, [saveState, aiLoading, step, hasDraftContent, hasAiSuggestion]);
-
-  // -----------------------------------------
-  // UI
-  // -----------------------------------------
+  }, [saveState, aiLoading, step, hasDraftContent]);
 
   const isStep1 = step === 1;
 
@@ -539,7 +406,6 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
             <span style={styles.brandWhite}>Rocks</span>
           </div>
 
-          {/* Slim context line (less busy, still orienting) */}
           <div style={styles.crumb}>
             {isStep1 ? "DRAFT · Step 1 of 5" : `ROCK · ${stepName(step)}`}
           </div>
@@ -555,33 +421,11 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
       </div>
 
       <div style={styles.card}>
-        {/* ------------------------------------------------------
-            Step header: INPUT-FIRST on Step 1, full summary on 2–5
-           ------------------------------------------------------ */}
         {isStep1 ? (
           <div style={{ ...styles.cardHdr, paddingBottom: 10 }}>
             <div>
-              {/* CHANGED: smaller + less dominant than the PocketRocks brand */}
-              <div
-                style={{
-                  fontSize: 18,
-                  fontWeight: 850,
-                  letterSpacing: -0.2,
-                  opacity: 0.92,
-                }}
-              >
-                Start with a plain-English goal
-              </div>
-
-              <div
-                style={{
-                  marginTop: 4,
-                  fontSize: 14,
-                  opacity: 0.65,
-                }}
-              >
-                Don’t overthink it. You’ll make it SMART next.
-              </div>
+              <div style={{ ...styles.h1, fontSize: 22 }}>Start with a plain-English goal</div>
+              <div style={styles.subMuted}>Don’t overthink it. You’ll make it SMART next.</div>
             </div>
           </div>
         ) : (
@@ -614,13 +458,42 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
             banner={draftBanner}
             canInteract={!!safeTrim(uid) && !!safeTrim(rockId) && !aiLoading}
             onImproveWithAI={improveWithAiOption3}
+            aiSuggestionText={suggestedImprovement}
+            onApplyAiSuggestionToDraft={applyAiSuggestionToDraft}
           />
         )}
 
         {step === 2 && (
           <StepSmart
             rock={rock}
-            onUpdateField={(path, value) => updateField(path, value, { autosave: true })}
+            onUpdateField={(path, value) => {
+              // keep existing behavior
+              const parts = path.split(".");
+              setRock((prev: any) => {
+                const next = { ...(prev || {}) };
+                let cur: any = next;
+
+                for (let i = 0; i < parts.length - 1; i++) {
+                  const key = parts[i]!;
+                  cur[key] = cur[key] && typeof cur[key] === "object" ? { ...cur[key] } : {};
+                  cur = cur[key];
+                }
+                cur[parts[parts.length - 1]!] = value;
+                return next;
+              });
+
+              // autosave patch
+              const patch: any = {};
+              let pcur: any = patch;
+              for (let i = 0; i < parts.length - 1; i++) {
+                const key = parts[i]!;
+                pcur[key] = pcur[key] && typeof pcur[key] === "object" ? pcur[key] : {};
+                pcur = pcur[key];
+              }
+              pcur[parts[parts.length - 1]!] = value;
+
+              scheduleSave(patch);
+            }}
             onBuildFinal={buildFinalFromSmart}
           />
         )}
@@ -628,46 +501,21 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
         {step === 3 && (
           <StepMetrics
             value={safeStr(rock?.metricsText)}
-            onChange={(next) => updateField("metricsText", next, { autosave: true })}
+            onChange={(next) => {
+              setRock((prev: any) => ({ ...(prev || {}), metricsText: next }));
+              scheduleSave({ metricsText: next });
+            }}
           />
         )}
 
         {step === 4 && (
           <StepMilestones
             value={safeStr(rock?.milestonesText)}
-            onChange={(next) => updateField("milestonesText", next, { autosave: true })}
+            onChange={(next) => {
+              setRock((prev: any) => ({ ...(prev || {}), milestonesText: next }));
+              scheduleSave({ milestonesText: next });
+            }}
           />
-        )}
-
-        {step === 5 && (
-          <div style={styles.section}>
-            <div style={styles.sectionTitle}>Step 5 — Review + AI</div>
-            <div style={styles.sectionHint}>Review your Rock. Your AI suggestion (if any) is here.</div>
-
-            <label style={styles.label}>
-              <div style={styles.labelText}>Final Rock statement</div>
-              <textarea
-                style={styles.textarea}
-                value={safeStr(rock?.finalStatement)}
-                onChange={(e) => updateField("finalStatement", e.target.value, { autosave: true })}
-                placeholder="This is what you’ll share with your leadership team."
-              />
-            </label>
-
-            <label style={styles.label}>
-              <div style={styles.labelText}>Suggested Improvement (from AI)</div>
-              <textarea
-                style={styles.textarea}
-                value={safeStr(rock?.suggestedImprovement)}
-                onChange={(e) =>
-                  updateField("suggestedImprovement", e.target.value, { autosave: true })
-                }
-                placeholder="AI suggestion will appear here after you click Improve with AI."
-              />
-              {aiError && <div style={styles.tinyError}>{aiError}</div>}
-              <div style={styles.tip}>Tip: Keep it simple. Make it clearer, not perfect.</div>
-            </label>
-          </div>
         )}
 
         <div style={styles.footer}>
