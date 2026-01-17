@@ -1,10 +1,10 @@
 /* ============================================================
-   FILE: src/app/login/page.tsx
+   FILE: src/app/signup/page.tsx
 
    SCOPE:
-   Public login page
+   Public signup page
    - Email + password
-   - Domain agnostic (no redirect providers)
+   - Domain agnostic
    - On success, routes to /dashboard
    ============================================================ */
 
@@ -14,18 +14,23 @@ import React, { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
 
-export default function LoginPage() {
+export default function SignupPage() {
   const router = useRouter();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [password2, setPassword2] = useState("");
 
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const canSubmit = useMemo(() => {
-    return email.trim().length > 3 && password.length > 0 && !busy;
-  }, [email, password, busy]);
+    if (busy) return false;
+    if (email.trim().length < 4) return false;
+    if (password.length < 8) return false;
+    if (password !== password2) return false;
+    return true;
+  }, [email, password, password2, busy]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -35,22 +40,31 @@ export default function LoginPage() {
     setErr(null);
 
     try {
-      const res = await fetch("/api/auth/login", {
+      const res = await fetch("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
 
       const data = await res.json();
-      if (!res.ok || !data?.ok) throw new Error(data?.error || "Login failed.");
+      if (!res.ok || !data?.ok) throw new Error(data?.error || "Signup failed.");
 
       router.push("/dashboard");
     } catch (e: any) {
-      setErr(e?.message || "Login failed.");
+      setErr(e?.message || "Signup failed.");
     } finally {
       setBusy(false);
     }
   }
+
+  const pwHint =
+    password.length === 0
+      ? "Use 8+ characters."
+      : password.length < 8
+        ? "Add a few more characters."
+        : password !== password2
+          ? "Passwords must match."
+          : "Looks good.";
 
   return (
     <div style={styles.page}>
@@ -60,8 +74,8 @@ export default function LoginPage() {
           <span style={styles.brandWhite}>Rocks</span>
         </div>
 
-        <div style={styles.h1}>Log in</div>
-        <div style={styles.sub}>Welcome back. Pick up where you left off.</div>
+        <div style={styles.h1}>Create your account</div>
+        <div style={styles.sub}>Start building clear Rocks and tracking them weekly.</div>
 
         {err && (
           <div style={styles.alert}>
@@ -88,23 +102,37 @@ export default function LoginPage() {
             <input
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
+              autoComplete="new-password"
               type="password"
-              placeholder="Your password"
+              placeholder="Create a password"
               style={styles.input}
             />
           </label>
 
+          <label style={styles.label}>
+            <div style={styles.labelText}>Confirm password</div>
+            <input
+              value={password2}
+              onChange={(e) => setPassword2(e.target.value)}
+              autoComplete="new-password"
+              type="password"
+              placeholder="Re-enter password"
+              style={styles.input}
+            />
+          </label>
+
+          <div style={styles.hint}>{pwHint}</div>
+
           <Button type="submit" disabled={!canSubmit}>
-            {busy ? "Logging in…" : "Log in"}
+            {busy ? "Creating…" : "Create account"}
           </Button>
 
           <button
             type="button"
-            onClick={() => router.push("/signup")}
+            onClick={() => router.push("/login")}
             style={styles.linkBtn}
           >
-            New here? Create an account →
+            Already have an account? Log in →
           </button>
         </form>
       </div>
@@ -123,7 +151,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: "white",
   },
   card: {
-    width: "min(520px, 92vw)",
+    width: "min(560px, 92vw)",
     borderRadius: 18,
     border: "1px solid rgba(255,255,255,0.10)",
     background: "rgba(255,255,255,0.03)",
@@ -156,6 +184,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: "white",
     outline: "none",
   },
+  hint: { fontSize: 12, opacity: 0.72, marginTop: -4, marginBottom: 2 },
   linkBtn: {
     marginTop: 4,
     appearance: "none",
