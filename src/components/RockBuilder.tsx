@@ -2,13 +2,14 @@
    FILE: src/components/RockBuilder.tsx
 
    SCOPE:
-   Fix TypeScript build error:
-   - Remove unreachable `return step === 1;` branch that causes TS to infer
-     step is not 1 in that code path.
-   - Keep behavior:
-     - Disable primary footer button while saving/AI
-     - On Step 1: disable until something is typed
-     - On Steps 2–5: do NOT disable due to step number
+   Rock Builder (Steps 1–5)
+   - Step 1 copy polish:
+     1) Remove "Back" button on Step 1
+     2) Change header text to: "Start with a goal…"
+   - Keeps:
+     - Step 1 AI panel logic as-is (handled inside StepDraft)
+     - Autosave + AI flow
+     - Final assembly on Step 5 entry
    ============================================================ */
 
 "use client";
@@ -304,7 +305,7 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
       if (!aliveRef.current) return;
 
       setSaveState("saved");
-      setDraftBanner({ kind: "ok", text: "AI suggestion added below." });
+      setDraftBanner({ kind: "ok", text: "AI suggestion added." });
     } catch (e: any) {
       devError("[RockBuilder] improveWithAiOption3 failed:", e);
 
@@ -324,7 +325,6 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
     const ai = safeTrim(suggestedImprovement);
     if (!ai) return;
 
-    // user draft becomes AI suggestion, and we save it right away.
     setRock((prev: any) => ({ ...(prev || {}), draft: ai }));
     scheduleSave({ draft: ai });
 
@@ -376,7 +376,6 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
 
   const footerPrimaryLabel = useMemo(() => {
     if (step === 1) return "Continue to SMART";
-    if (step === 5) return "Continue";
     return "Continue";
   }, [step]);
 
@@ -388,10 +387,9 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
     nextStep();
   }
 
-  // ✅ FIXED: remove unreachable branch that caused TS to infer step cannot be 1
   const footerPrimaryDisabled = useMemo(() => {
     if (saveState === "saving" || aiLoading) return true;
-    if (step === 1) return !hasDraftContent; // require something typed
+    if (step === 1 && !hasDraftContent) return true;
     return false;
   }, [saveState, aiLoading, step, hasDraftContent]);
 
@@ -424,7 +422,7 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
         {isStep1 ? (
           <div style={{ ...styles.cardHdr, paddingBottom: 10 }}>
             <div>
-              <div style={{ ...styles.h1, fontSize: 22 }}>Start with a plain-English goal</div>
+              <div style={{ ...styles.h1, fontSize: 22 }}>Start with a goal…</div>
               <div style={styles.subMuted}>Don’t overthink it. You’ll make it SMART next.</div>
             </div>
           </div>
@@ -467,7 +465,6 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
           <StepSmart
             rock={rock}
             onUpdateField={(path, value) => {
-              // keep existing behavior
               const parts = path.split(".");
               setRock((prev: any) => {
                 const next = { ...(prev || {}) };
@@ -482,7 +479,6 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
                 return next;
               });
 
-              // autosave patch
               const patch: any = {};
               let pcur: any = patch;
               for (let i = 0; i < parts.length - 1; i++) {
@@ -522,9 +518,12 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
           <div style={styles.footerLeft}>Step {step} of 5</div>
 
           <div style={styles.footerRight}>
-            <Button type="button" onClick={prevStep} disabled={step === 1}>
-              Back
-            </Button>
+            {/* Step 1 has no Back button (clean entry screen) */}
+            {step !== 1 && (
+              <Button type="button" onClick={prevStep}>
+                Back
+              </Button>
+            )}
 
             <Button type="button" onClick={footerPrimaryAction} disabled={footerPrimaryDisabled}>
               {footerPrimaryLabel}
