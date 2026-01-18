@@ -2,238 +2,165 @@
    FILE: src/app/dashboard/page.tsx
 
    SCOPE:
-   Dashboard page (CHARTER SCRUB — FINAL)
-   - Queries canonical collection: `rocks` (top-level)
-   - User-scoped query: where("userId", "==", uid)
-   - Stable fallback: if orderBy("updatedAt") fails, retry without orderBy
-   - Safe loading + alive guard
-   - Uses semantic button styling via buttonClassName()
+   Dashboard page
+   - Fix TypeScript: useAuth() returns { user, loading }
+   - Use uid from user?.uid (not top-level uid)
    ============================================================ */
 
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { useAuth } from "@/lib/useAuth";
-import { db, getFirebaseConfigStatus } from "@/lib/firebase";
-import { buttonClassName } from "@/components/Button";
-
-import {
-  collection,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  where,
-  type QueryConstraint,
-} from "firebase/firestore";
 
 type RockRow = {
   id: string;
-  title: string;
-  dueDate?: string | null;
-  status?: string | null;
+  title?: string;
+  draft?: string;
+  finalStatement?: string;
+  updatedAt?: any;
 };
 
-function safeText(v: any) {
+function safeStr(v: any) {
   return typeof v === "string" ? v : "";
 }
 
-function devError(...args: any[]) {
-  if (process.env.NODE_ENV !== "production") {
-    // eslint-disable-next-line no-console
-    console.error(...args);
-  }
-}
-
 export default function DashboardPage() {
-  const { uid, loading } = useAuth();
+  const { user, loading } = useAuth();
+  const uid = user?.uid || "";
 
   const [rows, setRows] = useState<RockRow[]>([]);
   const [err, setErr] = useState<string | null>(null);
-  const [loadingRocks, setLoadingRocks] = useState(false);
-
-  const configStatus = useMemo(() => getFirebaseConfigStatus(), []);
-  const firebaseReady = configStatus.ok;
-
-  const canLoad = useMemo(
-    () => !loading && Boolean(uid) && firebaseReady,
-    [loading, uid, firebaseReady]
-  );
 
   useEffect(() => {
     let alive = true;
 
     async function load() {
-      if (!canLoad || !uid) return;
-
-      setLoadingRocks(true);
-      setErr(null);
-
       try {
-        if (!db) {
-          setErr("init: Firebase not initialized (db is null).");
+        setErr(null);
+
+        // Not signed in yet
+        if (!uid) {
+          if (alive) setRows([]);
           return;
         }
 
-        const base = collection(db, "rocks");
+        const res = await fetch("/api/rocks/list", { method: "GET" });
+        const data = await res.json().catch(() => ({}));
 
-        // Primary plan: ordered by updatedAt
-        const ordered: QueryConstraint[] = [
-          where("userId", "==", uid),
-          orderBy("updatedAt", "desc"),
-          limit(50),
-        ];
+        if (!alive) return;
 
-        try {
-          const snap = await getDocs(query(base, ...ordered));
-
-          const items: RockRow[] = snap.docs.map((d) => {
-            const data: any = d.data();
-            return {
-              id: d.id,
-              title: safeText(data?.title) || safeText(data?.draft) || "Rock",
-              dueDate: safeText(data?.dueDate) || null,
-              status: safeText(data?.status) || null,
-            };
-          });
-
-          if (alive) setRows(items);
+        if (!res.ok) {
+          setErr(data?.error || "Failed to load rocks.");
+          setRows([]);
           return;
-        } catch (e: any) {
-          // Charter: never die on “nice-to-have sort”
-          devError("[Dashboard] ordered query failed, retrying without orderBy:", e);
         }
 
-        // Fallback plan: no orderBy (most compatible)
-        const fallback: QueryConstraint[] = [
-          where("userId", "==", uid),
-          limit(50),
-        ];
-
-        const snap2 = await getDocs(query(base, ...fallback));
-
-        const items2: RockRow[] = snap2.docs.map((d) => {
-          const data: any = d.data();
-          return {
-            id: d.id,
-            title: safeText(data?.title) || safeText(data?.draft) || "Rock",
-            dueDate: safeText(data?.dueDate) || null,
-            status: safeText(data?.status) || null,
-          };
-        });
-
-        if (alive) setRows(items2);
-
-        // Optional: explain why the list may look unsorted
-        if (alive) {
-          setErr(
-            "Note: Sorting is unavailable right now (missing index or updatedAt). Showing up to 50 Rocks."
-          );
-        }
+        const nextRows: RockRow[] = Array.isArray(data?.rows) ? data.rows : [];
+        setRows(nextRows);
       } catch (e: any) {
-        devError("[Dashboard] load failed:", e);
-        const msg = typeof e?.message === "string" ? e.message : "Failed to load Rocks.";
-        if (alive) setErr(msg);
-      } finally {
-        if (alive) setLoadingRocks(false);
+        if (!alive) return;
+        setErr(e?.message || "Failed to load rocks.");
+        setRows([]);
       }
     }
 
-    load();
+    if (!loading) load();
 
     return () => {
       alive = false;
     };
-  }, [canLoad, uid]);
+  }, [uid, loading]);
 
   return (
-    <main className="mx-auto max-w-4xl px-4 py-8">
-      <div className="flex items-start justify-between gap-4">
+    <div style={{ maxWidth: 980, margin: "0 auto", padding: "28px 16px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-          <p className="mt-1 text-sm text-white/70">
-            Your Rocks live here. Create a new Rock or open an existing one.
-          </p>
+          <div style={{ fontSize: 22, fontWeight: 850, letterSpacing: 0.2 }}>Dashboard</div>
+          <div style={{ opacity: 0.75, marginTop: 4 }}>
+            {loading ? "Loading…" : uid ? `Signed in as ${safeStr(user?.email)}` : "Not signed in"}
+          </div>
         </div>
 
         <Link
           href="/rocks/new"
-          className={buttonClassName({ variant: "primary" })}
-          aria-label="Create a new Rock"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "10px 12px",
+            borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.14)",
+            background: "rgba(255,255,255,0.06)",
+            color: "white",
+            textDecoration: "none",
+            fontWeight: 800,
+          }}
         >
-          <span className="text-base leading-none">+</span>
-          <span>New Rock</span>
+          New Rock
         </Link>
       </div>
 
-      <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
-        {!firebaseReady && (
-          <div className="rounded-xl border border-amber-400/25 bg-amber-300/10 p-3 text-sm text-amber-100">
-            <div className="font-extrabold">Config needed</div>
-            <div className="mt-1 opacity-90">
-              Firebase env vars are missing: <b>{configStatus.missing.join(", ")}</b>
-            </div>
+      {err && (
+        <div
+          style={{
+            marginTop: 16,
+            padding: "10px 12px",
+            borderRadius: 12,
+            border: "1px solid rgba(255,120,120,0.35)",
+            background: "rgba(255,80,80,0.10)",
+          }}
+        >
+          <div style={{ fontWeight: 800, marginBottom: 4 }}>Heads up</div>
+          <div style={{ opacity: 0.9 }}>{err}</div>
+        </div>
+      )}
+
+      <div style={{ marginTop: 18, display: "grid", gap: 10 }}>
+        {loading && (
+          <div style={{ opacity: 0.75, padding: "12px 0" }}>
+            Loading…
           </div>
         )}
-
-        {loading && <p className="text-sm text-white/70">Checking sign-in…</p>}
 
         {!loading && !uid && (
-          <div className="text-sm text-white/70">
-            <p>You’re not signed in.</p>
-
-            <Link
-              href="/login"
-              className={buttonClassName({ variant: "secondary", className: "mt-2" })}
-            >
-              Go to Login
-            </Link>
+          <div style={{ opacity: 0.75, padding: "12px 0" }}>
+            Please sign in to view your Rocks.
           </div>
         )}
 
-        {!loading && uid && firebaseReady && (
-          <>
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-white/70">
-                Signed in as <span className="text-white/90">{uid}</span>
-              </p>
-              {loadingRocks && <p className="text-xs text-white/60">Loading…</p>}
-            </div>
-
-            {err && (
-              <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-                {err}
-              </div>
-            )}
-
-            <div className="mt-4 divide-y divide-white/10 overflow-hidden rounded-xl border border-white/10">
-              {rows.length === 0 && !loadingRocks ? (
-                <div className="p-4 text-sm text-white/70">
-                  No Rocks yet. Click <b>New Rock</b> to make your first one.
-                </div>
-              ) : (
-                rows.map((r) => (
-                  <Link key={r.id} href={`/rocks/${r.id}`} className="block p-4 hover:bg-white/5">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-white">{r.title}</div>
-                        <div className="mt-1 text-xs text-white/60">
-                          {r.status ? `Status: ${r.status}` : "Status: —"}
-                          {" · "}
-                          {r.dueDate ? `Due: ${r.dueDate}` : "Due: —"}
-                        </div>
-                      </div>
-                      <span className="shrink-0 text-xs text-white/50">Open →</span>
-                    </div>
-                  </Link>
-                ))
-              )}
-            </div>
-          </>
+        {!loading && uid && rows.length === 0 && !err && (
+          <div style={{ opacity: 0.75, padding: "12px 0" }}>
+            No Rocks yet. Click “New Rock” to create your first one.
+          </div>
         )}
+
+        {!loading &&
+          uid &&
+          rows.map((r) => (
+            <Link
+              key={r.id}
+              href={`/rocks/${encodeURIComponent(r.id)}`}
+              style={{
+                display: "block",
+                padding: 14,
+                borderRadius: 16,
+                border: "1px solid rgba(255,255,255,0.10)",
+                background: "rgba(255,255,255,0.03)",
+                textDecoration: "none",
+                color: "white",
+              }}
+            >
+              <div style={{ fontWeight: 850, fontSize: 15, letterSpacing: 0.2 }}>
+                {safeStr(r.title) || "Rock"}
+              </div>
+              <div style={{ marginTop: 6, opacity: 0.75, lineHeight: 1.35 }}>
+                {safeStr(r.finalStatement) || safeStr(r.draft) || "—"}
+              </div>
+            </Link>
+          ))}
       </div>
-    </main>
+    </div>
   );
 }

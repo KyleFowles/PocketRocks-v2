@@ -2,115 +2,132 @@
    FILE: src/app/providers.tsx
 
    SCOPE:
-   App-wide Providers (CHARTER SCRUB)
-   - Owns AuthContext wiring in one place
-   - Always provides a stable AuthState shape (including signOut)
-   - Handles missing Firebase config gracefully (no crashes)
-   - Applies theme once on mount
-   - Never leaves the app stuck in loading state
-   - Guards against null auth client (getAuthClient can return null)
-   - Avoids setState after unmount (alive guard)
+   App Providers
+   - Fix AuthState typing: map Firebase User -> AuthUser (email can be null)
+   - Provides AuthContext with shape: { user, loading, signOut }
    ============================================================ */
 
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { onAuthStateChanged, signOut as fbSignOut, type User } from "firebase/auth";
 
 import { getAuthClient, isFirebaseConfigured } from "@/lib/firebase";
-import { AuthContext, type AuthState } from "@/lib/useAuth";
+import { AuthContext, type AuthState, type AuthUser } from "@/lib/useAuth";
 import { applyTheme, DEFAULT_THEME } from "@/lib/theme";
 
 function devError(...args: any[]) {
-  if (process.env.NODE_ENV !== "production") {
-    // eslint-disable-next-line no-console
-    console.error(...args);
-  }
+  if (process.env.NODE_ENV !== "production") console.error(...args);
 }
 
-export default function Providers({ children }: { children: React.ReactNode }) {
-  // Env config won’t change at runtime; memo keeps this stable.
-  const firebaseReady = useMemo(() => isFirebaseConfigured(), []);
+type Props = { children: React.ReactNode };
 
-  const [uid, setUid] = useState<string | null>(null);
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+export default function Providers({ children }: Props) {
+  const [firebaseReady, setFirebaseReady] = useState(false);
 
-  // Apply theme once
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Theme init (keep existing behavior)
   useEffect(() => {
     try {
       applyTheme(DEFAULT_THEME);
-    } catch (e) {
-      devError("[Providers] applyTheme failed:", e);
+    } catch {
+      // ignore
     }
   }, []);
 
-  // Auth subscription
+  // Firebase auth wiring
   useEffect(() => {
+    let unsub: any = null;
     let alive = true;
-    let unsub: (() => void) | null = null;
 
-    // If Firebase isn't configured, stop loading and allow the app to render.
-    if (!firebaseReady) {
-      setUid(null);
-      setUser(null);
-      setLoading(false);
-      return () => {};
-    }
+    async function boot() {
+      try {
+        setLoading(true);
 
-    // We are configured; we are about to subscribe.
-    setLoading(true);
+        if (!isFirebaseConfigured()) {
+          // App can still run without Firebase configured (dev / locked down mode)
+          if (!alive) return;
+          setFirebaseReady(false);
+          setUser(null);
+          setLoading(false);
+          return;
+        }
 
-    try {
-      const auth = getAuthClient();
+        const auth = getAuthClient();
+        setFirebaseReady(true);
 
-      // Charter: never crash if auth is null (init failed unexpectedly).
-      if (!auth) {
-        setUid(null);
+        // Dynamic import to avoid bundling issues in some setups
+        const { onAuthStateChanged } = await import("firebase/auth");
+
+        unsub = onAuthStateChanged(auth, (fbUser) => {
+          if (!alive) return;
+
+          if (!fbUser) {
+            setUser(null);
+            setLoading(false);
+            return;
+          }
+
+          // Map Firebase User -> AuthUser (email may be null)
+          setUser({
+            uid: fbUser.uid,
+            email: fbUser.email,
+            name: fbUser.displayName ?? null,
+          });
+
+          setLoading(false);
+        });
+      } catch (e: any) {
+        devError("[Providers] boot failed:", e);
+        if (!alive) return;
+        setFirebaseReady(false);
         setUser(null);
         setLoading(false);
-        return () => {};
       }
-
-      unsub = onAuthStateChanged(auth, (u: User | null) => {
-        if (!alive) return;
-        setUid(u?.uid ?? null);
-        setUser(u);
-        setLoading(false);
-      });
-    } catch (e) {
-      devError("[Providers] Auth init failed:", e);
-      setUid(null);
-      setUser(null);
-      setLoading(false);
     }
+
+    boot();
 
     return () => {
       alive = false;
-      if (unsub) unsub();
+      try {
+        unsub?.();
+      } catch {
+        // ignore
+      }
     };
-  }, [firebaseReady]);
+  }, []);
+
+  async function signOut() {
+    try {
+      // Clear server session cookie (if you have it)
+      // Don't hard-fail if route doesn't exist yet.
+      await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+    } catch {
+      // ignore
+    }
+
+    try {
+      if (firebaseReady && isFirebaseConfigured()) {
+        const auth = getAuthClient();
+        const { signOut: fbSignOut } = await import("firebase/auth");
+        await fbSignOut(auth);
+      }
+    } catch {
+      // ignore
+    }
+
+    setUser(null);
+  }
 
   const value: AuthState = useMemo(
     () => ({
-      uid,
       user,
       loading,
-      signOut: async () => {
-        // Charter: never throw from signOut when firebase isn't ready
-        if (!firebaseReady) return;
-
-        try {
-          const auth = getAuthClient();
-          if (!auth) return;
-          await fbSignOut(auth);
-        } catch (e) {
-          devError("[Providers] signOut failed:", e);
-          // swallow: UI can decide whether to show an error
-        }
-      },
+      signOut,
     }),
-    [uid, user, loading, firebaseReady]
+    [user, loading]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
