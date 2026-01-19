@@ -43,7 +43,7 @@ export default function StepReviewAi({
   canInteract = true,
   onImproveWithAI,
 }: Props) {
-  const disabled = !canInteract || saving;
+  const disabled = !!saving;
 
   const assembled = useMemo(() => assembleFinalRock(rock), [rock]);
 

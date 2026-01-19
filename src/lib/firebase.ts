@@ -2,115 +2,64 @@
    FILE: src/lib/firebase.ts
 
    SCOPE:
-   Firebase client initialization (CHARTER HARDENED)
-   - Reads NEXT_PUBLIC_* config
-   - Never throws during import
-   - Exposes clear diagnostics via getFirebaseConfigStatus()
-   - Backward compatible exports:
-       - isFirebaseConfigured()
-       - getAuthClient()  (returns Auth OR throws clear error)
-   - Exports: app, auth, db
+   Client Firebase helpers (NO Firestore client)
+   - Firestore is SERVER-ONLY via Admin SDK + /api routes.
+   - This file intentionally does NOT export a Firestore instance.
    ============================================================ */
 
-import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
+"use client";
+
+import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
-import { getFirestore, type Firestore } from "firebase/firestore";
 
-type FirebaseConfig = {
-  apiKey: string;
-  authDomain: string;
-  projectId: string;
-  storageBucket: string;
-  messagingSenderId: string;
-  appId: string;
-};
+let _app: FirebaseApp | null = null;
+let _auth: Auth | null = null;
 
-function s(v: unknown) {
-  return typeof v === "string" ? v.trim() : "";
+function env(name: string): string {
+  return (process.env[name] || "").trim();
 }
 
-function readConfig(): FirebaseConfig {
-  return {
-    apiKey: s(process.env.NEXT_PUBLIC_FIREBASE_API_KEY),
-    authDomain: s(process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN),
-    projectId: s(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID),
-    storageBucket: s(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET),
-    messagingSenderId: s(process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID),
-    appId: s(process.env.NEXT_PUBLIC_FIREBASE_APP_ID),
-  };
-}
-
-/**
- * Public diagnostic helper.
- */
-export function getFirebaseConfigStatus() {
-  const cfg = readConfig();
-  const missing: string[] = [];
-
-  if (!cfg.apiKey) missing.push("NEXT_PUBLIC_FIREBASE_API_KEY");
-  if (!cfg.authDomain) missing.push("NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN");
-  if (!cfg.projectId) missing.push("NEXT_PUBLIC_FIREBASE_PROJECT_ID");
-  if (!cfg.storageBucket) missing.push("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET");
-  if (!cfg.messagingSenderId) missing.push("NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID");
-  if (!cfg.appId) missing.push("NEXT_PUBLIC_FIREBASE_APP_ID");
-
-  return {
-    ok: missing.length === 0,
-    missing,
-    preview: {
-      apiKey: cfg.apiKey ? `${cfg.apiKey.slice(0, 6)}…` : "",
-      authDomain: cfg.authDomain ? `${cfg.authDomain.slice(0, 6)}…` : "",
-      projectId: cfg.projectId ? `${cfg.projectId.slice(0, 6)}…` : "",
-    },
-  };
-}
-
-/**
- * BACKCOMPAT: providers.tsx expects a NAMED export `isFirebaseConfigured`
- */
 export function isFirebaseConfigured(): boolean {
-  return getFirebaseConfigStatus().ok;
+  // If you still use Firebase Auth in the browser, keep these.
+  // If not, this can still be true/false safely.
+  return !!(
+    env("NEXT_PUBLIC_FIREBASE_API_KEY") &&
+    env("NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN") &&
+    env("NEXT_PUBLIC_FIREBASE_PROJECT_ID")
+  );
 }
 
-/**
- * Initialize Firebase app safely.
- */
-function initFirebase(): FirebaseApp | null {
+export function getFirebaseClientApp(): FirebaseApp | null {
   if (!isFirebaseConfigured()) return null;
 
-  const config = readConfig();
-  try {
-    return getApps().length ? getApp() : initializeApp(config);
-  } catch {
-    return null;
-  }
+  if (_app) return _app;
+
+  const config = {
+    apiKey: env("NEXT_PUBLIC_FIREBASE_API_KEY"),
+    authDomain: env("NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN"),
+    projectId: env("NEXT_PUBLIC_FIREBASE_PROJECT_ID"),
+    storageBucket: env("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET"),
+    messagingSenderId: env("NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID"),
+    appId: env("NEXT_PUBLIC_FIREBASE_APP_ID"),
+  };
+
+  _app = getApps().length ? getApps()[0]! : initializeApp(config);
+  return _app;
 }
 
-export const app: FirebaseApp | null = initFirebase();
+export function getAuthClient(): Auth | null {
+  const app = getFirebaseClientApp();
+  if (!app) return null;
+  if (_auth) return _auth;
+  _auth = getAuth(app);
+  return _auth;
+}
 
 /**
- * Auth + Firestore instances (or null if not configured).
+ * IMPORTANT:
+ * Firestore client is intentionally NOT available.
+ * All Rock data must go through /api routes (Admin SDK).
  */
-export const auth: Auth | null = app ? getAuth(app) : null;
-export const db: Firestore | null = app ? getFirestore(app) : null;
-
-/**
- * BACKCOMPAT: providers.tsx expects a NAMED export `getAuthClient`
- *
- * Charter behavior:
- * - If Firebase isn’t configured, throw a clear error
- * - If app/auth failed to init, throw a clear error
- * - Callers can catch and handle gracefully
- */
-export function getAuthClient(): Auth {
-  if (!isFirebaseConfigured()) {
-    throw new Error("config: Firebase env missing (NEXT_PUBLIC_FIREBASE_*).");
-  }
-  if (!app) {
-    throw new Error("init: Firebase app failed to initialize.");
-  }
-  if (!auth) {
-    throw new Error("init: Firebase auth failed to initialize.");
-  }
-  return auth;
+export function getFirestoreClient(): never {
+  throw new Error("Firestore client is disabled. Use /api routes (Admin SDK) instead.");
 }

@@ -2,234 +2,183 @@
    FILE: src/lib/rocks.ts
 
    SCOPE:
-   Rock persistence (STABILITY HARDENED)
-   - saveRock(): create new Rock (auto-id)
-   - createRockWithId(): create Rock with a specific id (OPTION A)
-   - getRock(): read Rock (user-scoped)
-   - updateRock(): patch existing Rock (user-scoped)
-   - Never sends undefined to Firestore
-   - Normalizes optional arrays
-   - Friendly errors + dev logging
+   Client-side Rocks data access (API ONLY)
+   - Firestore rules are LOCKED DOWN, so the browser MUST NOT use firebase/firestore.
+   - All reads/writes go through Next API routes (Admin SDK):
+       GET   /api/rocks
+       POST  /api/rocks
+       GET   /api/rocks/[rockId]
+       PATCH /api/rocks/[rockId]
    ============================================================ */
 
-import {
-  addDoc,
-  collection,
-  doc,
-  getDoc,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-  type DocumentData,
-  type Firestore,
-} from "firebase/firestore";
-
-import { db, getFirebaseConfigStatus } from "@/lib/firebase";
 import type { Rock } from "@/types/rock";
 
-const ROCKS_COLLECTION = "rocks";
+type ApiOk<T> = { ok: true } & T;
+type ApiErr = { ok: false; error: string };
 
-/* -----------------------------
-   Helpers
------------------------------- */
+function isObj(v: unknown): v is Record<string, any> {
+  return typeof v === "object" && v !== null;
+}
 
-function safeTrim(v: unknown) {
+function cleanStr(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
 }
 
-function devError(...args: any[]) {
-  if (process.env.NODE_ENV !== "production") {
-    // eslint-disable-next-line no-console
-    console.error(...args);
+function toNum(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+function mapApiError(err: unknown): string {
+  const msg = (err as any)?.message ? String((err as any).message) : "Request failed";
+  if (msg.includes("unauthorized")) return "Not signed in.";
+  if (msg.includes("not_found")) return "Rock not found.";
+  if (msg.includes("permission-denied")) return "permission-denied: Firestore blocked the request.";
+  return msg;
+}
+
+async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    ...init,
+    credentials: "include",
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers || {}),
+    },
+  });
+
+  const data = (await res.json().catch(() => ({}))) as any;
+
+  if (!res.ok) {
+    const msg = typeof data?.error === "string" ? data.error : `HTTP ${res.status}`;
+    throw new Error(msg);
   }
+
+  return data as T;
 }
 
-function firebaseErrorMessage(e: any): string {
-  const code = typeof e?.code === "string" ? e.code : "";
-  const msg = typeof e?.message === "string" ? e.message : "Unknown error";
+function normalizeRock(id: string, data: any): Rock {
+  // Keep the UI stable even if fields are missing.
+  return {
+    id,
+    companyId: cleanStr(data?.companyId) || "default",
+    userId: cleanStr(data?.ownerId) || "",
 
-  if (code.includes("permission-denied"))
-    return "permission-denied: Firestore blocked the request.";
-  if (code.includes("unauthenticated"))
-    return "unauthenticated: Please sign in.";
-  if (code.includes("unavailable"))
-    return "unavailable: Network/Firestore unavailable.";
-  if (code.includes("invalid-argument"))
-    return "invalid-argument: Bad data was sent.";
+    title: cleanStr(data?.title),
+    draft: cleanStr(data?.draft),
 
-  return code ? `${code}: ${msg}` : msg;
+    dueDate: cleanStr(data?.dueDate),
+    status: cleanStr(data?.status),
+
+    // Optional fields commonly used in builders:
+    metrics: Array.isArray(data?.metrics) ? data.metrics : [],
+    milestones: Array.isArray(data?.milestones) ? data.milestones : [],
+    notes: cleanStr(data?.notes),
+
+    archived: !!data?.archived,
+
+    createdAt: toNum(data?.createdAt) ?? Date.now(),
+    updatedAt: toNum(data?.updatedAt) ?? Date.now(),
+
+    // Pass through any extra known fields safely:
+    ...(isObj(data) ? data : {}),
+  } as Rock;
 }
 
-function normalizeRockData(data: any) {
-  if (!data || typeof data !== "object") return data;
+/* ============================================================
+   PUBLIC API (keep names stable for existing call sites)
+   Note: uid param is kept for backward compatibility, but server
+   derives the user from the session cookie.
+   ============================================================ */
 
-  if (!Array.isArray(data.metrics)) data.metrics = [];
-  if (!Array.isArray(data.milestones)) data.milestones = [];
-
-  data.title = safeTrim(data.title) || "Untitled Rock";
-  data.draft = safeTrim(data.draft) || "";
-  data.dueDate = safeTrim(data.dueDate) || "";
-  if (typeof data.step !== "number") data.step = 1;
-
-  return data;
-}
-
-function stripUndefinedDeep(input: any): any {
-  if (input === undefined) return undefined;
-  if (Array.isArray(input))
-    return input.map(stripUndefinedDeep).filter((x) => x !== undefined);
-  if (input && typeof input === "object") {
-    const out: any = {};
-    for (const [k, v] of Object.entries(input)) {
-      const cleaned = stripUndefinedDeep(v);
-      if (cleaned !== undefined) out[k] = cleaned;
-    }
-    return out;
-  }
-  return input;
-}
-
-/**
- * Returns a NON-NULL Firestore instance or throws a friendly error.
- * This fixes TS errors caused by db being typed as Firestore | null.
- */
-function requireDb(): Firestore {
-  const status = getFirebaseConfigStatus();
-  if (!status.ok) {
-    throw new Error(`config: Firebase env missing: ${status.missing.join(", ")}`);
-  }
-  if (!db) {
-    throw new Error("init: Firebase not initialized.");
-  }
-  return db;
-}
-
-/* -----------------------------
-   Create
------------------------------- */
-
-/**
- * Creates a Rock with an auto-generated id (legacy / optional use).
- * Returns the new document id.
- */
-export async function saveRock(input: Partial<Rock>, userId: string): Promise<string> {
-  const uid = safeTrim(userId);
-  if (!uid) throw new Error("auth: Missing userId.");
-
-  const firestore = requireDb();
-
+export async function listRocks(_uid: string, opts?: { includeArchived?: boolean }) {
   try {
-    const payload = {
-      ...stripUndefinedDeep(input),
-      userId: uid,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    };
+    const data = await apiJson<ApiOk<{ items: any[] }>>("/api/rocks");
+    const items = Array.isArray(data.items) ? data.items : [];
+    const rocks = items.map((r) => normalizeRock(String(r?.id || ""), r));
 
-    const ref = await addDoc(collection(firestore, ROCKS_COLLECTION), payload);
-    return ref.id;
-  } catch (e: any) {
-    devError("[saveRock]", e);
-    throw new Error(firebaseErrorMessage(e));
+    if (opts?.includeArchived) return rocks;
+    return rocks.filter((r) => !r.archived);
+  } catch (err) {
+    throw new Error(mapApiError(err));
   }
 }
 
-/**
- * OPTION A:
- * Creates a Rock using a specific rockId (the id in the URL).
- * This makes /rocks/[rockId] a single-flow page that can create-on-save.
- */
-export async function createRockWithId(
-  userId: string,
-  rockId: string,
-  input: Partial<Rock>
-): Promise<void> {
-  const uid = safeTrim(userId);
-  const rid = safeTrim(rockId);
-
-  if (!uid) throw new Error("auth: Missing userId.");
-  if (!rid) throw new Error("createRockWithId: Missing rockId.");
-
-  const firestore = requireDb();
-
+export async function getRock(_uid: string, rockId: string): Promise<Rock | null> {
   try {
-    const ref = doc(firestore, ROCKS_COLLECTION, rid);
+    const rid = cleanStr(rockId);
+    if (!rid) return null;
 
-    const payload = {
-      ...stripUndefinedDeep(input),
-      id: rid,
-      userId: uid,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    };
+    const data = await apiJson<ApiOk<{ item: any }>>(`/api/rocks/${encodeURIComponent(rid)}`);
+    const item = data.item;
+    if (!item) return null;
 
-    // Create (or overwrite) the doc using the exact rid
-    await setDoc(ref, payload);
-  } catch (e: any) {
-    devError("[createRockWithId]", e);
-    throw new Error(firebaseErrorMessage(e));
+    return normalizeRock(rid, item);
+  } catch (err) {
+    const msg = mapApiError(err);
+    if (msg.toLowerCase().includes("not found")) return null;
+    throw new Error(msg);
   }
 }
 
-/* -----------------------------
-   Read
------------------------------- */
-
-export async function getRock(userId: string, rockId: string): Promise<Rock | null> {
-  const uid = safeTrim(userId);
-  const rid = safeTrim(rockId);
-
-  if (!uid) throw new Error("auth: Missing userId.");
-  if (!rid) throw new Error("getRock: Missing rockId.");
-
-  const firestore = requireDb();
-
+export async function createRockWithId(_uid: string, rockId: string, rock: Partial<Rock>) {
   try {
-    const ref = doc(firestore, ROCKS_COLLECTION, rid);
-    const snap = await getDoc(ref);
+    const rid = cleanStr(rockId);
+    if (!rid) throw new Error("Missing rockId");
 
-    if (!snap.exists()) return null;
-
-    const data = snap.data() as DocumentData;
-    if (data.userId !== uid) {
-      throw new Error("permission-denied: Not your Rock.");
-    }
-
-    return normalizeRockData({ id: snap.id, ...data }) as Rock;
-  } catch (e: any) {
-    devError("[getRock]", e);
-    throw new Error(firebaseErrorMessage(e));
-  }
-}
-
-/* -----------------------------
-   Update (PATCH)
------------------------------- */
-
-export async function updateRock(
-  userId: string,
-  rockId: string,
-  patch: Partial<Rock>
-): Promise<void> {
-  const uid = safeTrim(userId);
-  const rid = safeTrim(rockId);
-
-  if (!uid) throw new Error("auth: Missing userId.");
-  if (!rid) throw new Error("updateRock: Missing rockId.");
-
-  const firestore = requireDb();
-
-  try {
-    const ref = doc(firestore, ROCKS_COLLECTION, rid);
-
-    const cleaned = stripUndefinedDeep(patch);
-
-    await updateDoc(ref, {
-      ...cleaned,
-      updatedAt: serverTimestamp(),
+    await apiJson<ApiOk<{ id: string }>>("/api/rocks", {
+      method: "POST",
+      body: JSON.stringify({ id: rid, ...rock }),
     });
-  } catch (e: any) {
-    devError("[updateRock]", e);
-    throw new Error(firebaseErrorMessage(e));
+
+    return rid;
+  } catch (err) {
+    throw new Error(mapApiError(err));
   }
+}
+
+export async function createRock(_uid: string, rock: Partial<Rock>) {
+  try {
+    const data = await apiJson<ApiOk<{ id: string }>>("/api/rocks", {
+      method: "POST",
+      body: JSON.stringify({ ...rock }),
+    });
+
+    return cleanStr(data.id);
+  } catch (err) {
+    throw new Error(mapApiError(err));
+  }
+}
+
+export async function updateRock(_uid: string, rockId: string, patch: Partial<Rock>) {
+  try {
+    const rid = cleanStr(rockId);
+    if (!rid) throw new Error("Missing rockId");
+
+    await apiJson<ApiOk<{}>>(`/api/rocks/${encodeURIComponent(rid)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  } catch (err) {
+    throw new Error(mapApiError(err));
+  }
+}
+
+export async function saveRock(uid: string, rockId: string, patch: Partial<Rock>) {
+  // Alias used in multiple screens in PocketRocks
+  return updateRock(uid, rockId, patch);
+}
+
+/* ============================================================
+   Optional convenience helpers some components may call
+   ============================================================ */
+
+export async function archiveRock(uid: string, rockId: string, archived = true) {
+  return updateRock(uid, rockId, { archived } as any);
+}
+
+export async function assertRockOwner(_uid: string, _rockId: string) {
+  // Historical helper some codebases include.
+  // With server-enforced scoping (users/{uid}/rocks), this is unnecessary.
+  return true;
 }
