@@ -1,0 +1,17 @@
+file	uid	userId	ownerId	ownerUid	sessionUid	/api/auth/me	Authorization header	cookies()
+src/app/api/auth/login/route.ts	6	0	0	0	0	0	0	2
+src/app/api/auth/me/route.ts	2	0	0	0	0	1	0	1
+src/app/api/auth/signup/route.ts	6	0	0	0	0	0	0	0
+src/app/api/rocks/[rockId]/route.ts	3	0	1	0	0	1	0	0
+src/app/api/rocks/route.ts	3	0	1	0	0	1	0	0
+src/app/page.tsx	4	0	0	0	0	0	0	0
+src/app/providers.tsx	0	0	0	0	0	1	0	0
+src/app/rocks/[rockId]/page.tsx	3	0	1	0	0	0	0	0
+src/components/RockBuilder.tsx	11	7	4	0	3	0	0	0
+src/components/rockBuilder/types.ts	1	0	0	0	0	0	0	0
+src/lib/auth.ts	7	0	0	0	0	0	0	8
+src/lib/authEdge.ts	5	0	0	0	0	0	0	0
+src/lib/authServer.ts	9	0	0	0	0	1	0	0
+src/lib/rocks.ts	6	0	2	0	0	0	0	0
+src/lib/useAuth.tsx	1	0	0	0	0	2	0	0
+src/types/rock.ts	0	2	1	0	0	0	0	0

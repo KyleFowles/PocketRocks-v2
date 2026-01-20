@@ -2,262 +2,160 @@
    FILE: src/app/rocks/[rockId]/page.tsx
 
    SCOPE:
-   Rock detail page — OPTION A (Single Flow) + CHARTER SCRUB
-   - Safe rockId param parsing
-   - Waits for auth uid
-   - If URL has ?new=1:
-       -> skips getRock() and opens builder with empty rock skeleton
-   - Otherwise:
-       -> reads via getRock(uid, rockId)
-   - Normalizes arrays to prevent downstream .map crashes
-   - DEV-only logs load errors
-   - Prevents setState after unmount
+   Rock Detail / Builder Route
+   - Fix TS: user possibly null (build blocker)
+   - World-class flow:
+     - If user missing: route to /login (no partial writes)
+     - If ?new=1: create rock once, then replace URL to remove new=1
+     - Load rock data safely before rendering builder
    ============================================================ */
 
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+
+import RockBuilder from "@/components/RockBuilder";
+import { Button } from "@/components/Button";
 
 import { useAuth } from "@/lib/useAuth";
-import { getRock } from "@/lib/rocks";
-import RockBuilder from "@/components/RockBuilder";
+import { createRockWithId } from "@/lib/rocks";
 
-type LoadState = "idle" | "loading" | "ready" | "error";
-
-function devError(...args: any[]) {
-  if (process.env.NODE_ENV !== "production") {
-    // eslint-disable-next-line no-console
-    console.error(...args);
-  }
+function safeTrim(v: unknown) {
+  return typeof v === "string" ? v.trim() : "";
 }
 
-function firstParam(v: unknown): string {
-  if (typeof v === "string") return v;
-  if (Array.isArray(v) && typeof v[0] === "string") return v[0];
-  return "";
-}
+type LoadState = "loading" | "ready" | "error";
 
-function normalizeRock(r: any) {
-  if (!r || typeof r !== "object") return r;
-
-  return {
-    ...r,
-    metrics: Array.isArray((r as any).metrics) ? (r as any).metrics : [],
-    milestones: Array.isArray((r as any).milestones) ? (r as any).milestones : [],
-  };
-}
-
-function makeNewRockSkeleton(rockId: string) {
-  return normalizeRock({
-    id: rockId,
-    title: "",
-    draft: "",
-    metrics: [],
-    milestones: [],
-  });
-}
-
-export default function RockDetailPage() {
+export default function RockPage() {
+  const router = useRouter();
   const params = useParams();
-  const rockId = useMemo(() => firstParam((params as any)?.rockId), [params]);
-
   const searchParams = useSearchParams();
-  const isNew = searchParams?.get("new") === "1";
 
-  const { uid, loading: authLoading } = useAuth();
+  const rockId = useMemo(() => safeTrim((params as any)?.rockId), [params]);
+  const isNew = useMemo(() => safeTrim(searchParams?.get("new")) === "1", [searchParams]);
 
-  const [loadState, setLoadState] = useState<LoadState>("idle");
-  const [rock, setRock] = useState<any>(null);
-  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const { user, loading: authLoading } = useAuth();
 
-  const missingRockId = !rockId;
-  const notSignedIn = !authLoading && !uid;
+  const [state, setState] = useState<LoadState>("loading");
+  const [err, setErr] = useState<string | null>(null);
 
-  // Reset state whenever the target rock changes (prevents stale UI)
+  const [initialRock, setInitialRock] = useState<any>(null);
+
+  // Guard to prevent double-create in React strict mode / rerenders
+  const createdOnceRef = useRef(false);
+
+  // ---------- Helper: Load rock via API ----------
+  async function loadRock(uid: string, id: string) {
+    const res = await fetch(`/api/rocks/${id}`, { method: "GET" });
+    if (!res.ok) throw new Error(`Failed to load rock (${res.status}).`);
+    const data = await res.json();
+    // The API may return null/undefined or missing shape — normalize lightly.
+    return data || { id, userId: uid };
+  }
+
   useEffect(() => {
-    setRock(null);
-    setLoadErr(null);
-    setLoadState("idle");
-  }, [rockId]);
-
-  useEffect(() => {
-    let alive = true;
+    let cancelled = false;
 
     async function run() {
-      setLoadErr(null);
+      setErr(null);
+      setState("loading");
 
-      if (!rockId) {
-        setLoadState("error");
-        setLoadErr("Missing rockId in the URL.");
+      const id = rockId;
+      if (!id) {
+        setErr("Missing rock id.");
+        setState("error");
         return;
       }
 
-      if (!uid) {
-        // Auth finished but no uid: UI will show sign-in required.
+      // Wait for auth to resolve
+      if (authLoading) return;
+
+      // If not signed in, route to login (world-class: no partial writes)
+      if (!user || !safeTrim(user.uid)) {
+        router.push("/login");
         return;
       }
 
-      // OPTION A: brand-new rock should NOT read Firestore first
-      if (isNew) {
-        setRock(makeNewRockSkeleton(rockId));
-        setLoadState("ready");
-        return;
-      }
+      const uid = user.uid;
 
       try {
-        setLoadState("loading");
+        // If URL indicates "new", create once, then remove the flag from URL.
+        if (isNew && !createdOnceRef.current) {
+          createdOnceRef.current = true;
 
-        const r = await getRock(uid, rockId);
-        if (!alive) return;
+          const initial = {
+            id,
+            userId: uid,
+            step: 1,
+            title: "",
+            draft: "",
+            metrics: [],
+            milestones: [],
+          };
 
-        if (!r) {
-          // Not found: treat as new (but without the ?new=1 hint)
-          setRock(makeNewRockSkeleton(rockId));
-          setLoadState("ready");
-          return;
+          await createRockWithId(uid, id, initial);
+
+          // ✅ stop treating this as "new" going forward.
+          // This prevents surprise “jump back” behavior.
+          router.replace(`/rocks/${id}`);
         }
 
-        setRock(normalizeRock(r));
-        setLoadState("ready");
+        const loaded = await loadRock(uid, id);
+
+        if (cancelled) return;
+
+        setInitialRock(loaded);
+        setState("ready");
       } catch (e: any) {
-        if (!alive) return;
-
-        devError("[RockDetailPage] getRock failed:", e);
-
-        setRock(null);
-        setLoadState("error");
-        setLoadErr(typeof e?.message === "string" ? e.message : "Failed to load rock.");
+        if (cancelled) return;
+        setErr(e?.message || "Something went wrong.");
+        setState("error");
       }
     }
 
-    if (!authLoading && uid && rockId) {
-      run();
-    }
+    run();
 
     return () => {
-      alive = false;
+      cancelled = true;
     };
-  }, [authLoading, uid, rockId, isNew]);
+  }, [rockId, isNew, authLoading, user, router]);
 
-  // ---- UI states ----
-
-  if (authLoading || loadState === "loading") {
+  if (state === "loading") {
     return (
-      <div style={shell}>
-        <div style={brand}>PocketRocks</div>
-        <div style={muted}>Loading…</div>
-      </div>
-    );
-  }
-
-  if (missingRockId) {
-    return (
-      <div style={shell}>
-        <div style={brand}>PocketRocks</div>
-        <div style={muted}>Rock</div>
-
-        <div style={alert}>
-          <div style={alertTitle}>Heads up</div>
-          <div style={alertBody}>Missing rockId in the URL.</div>
+      <div className="pr-page" style={{ padding: 22 }}>
+        <div style={{ opacity: 0.8, fontWeight: 800 }}>Loading Rock…</div>
+        <div style={{ opacity: 0.6, marginTop: 6, fontSize: 13 }}>
+          Getting your data ready.
         </div>
       </div>
     );
   }
 
-  if (notSignedIn) {
+  if (state === "error") {
     return (
-      <div style={shell}>
-        <div style={brand}>PocketRocks</div>
-        <div style={muted}>Rock</div>
+      <div className="pr-page" style={{ padding: 22 }}>
+        <div style={{ fontWeight: 900, fontSize: 18 }}>Couldn’t load this Rock</div>
+        <div style={{ opacity: 0.75, marginTop: 8 }}>{err || "Unknown error."}</div>
 
-        <div style={alertWarn}>
-          <div style={alertTitle}>Sign in required</div>
-          <div style={alertBody}>Please sign in to view this Rock.</div>
+        <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <Button type="button" onClick={() => router.push("/dashboard")}>
+            Back to dashboard
+          </Button>
+          <Button type="button" onClick={() => router.refresh()}>
+            Try again
+          </Button>
         </div>
       </div>
     );
   }
 
-  if (loadState === "error") {
-    return (
-      <div style={shell}>
-        <div style={brand}>PocketRocks</div>
-        <div style={muted}>Rock</div>
-
-        <div style={alert}>
-          <div style={alertTitle}>Heads up</div>
-          <div style={alertBody}>{loadErr || "Failed to load rock."}</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!uid || !rockId || !rock) {
-    return (
-      <div style={shell}>
-        <div style={brand}>PocketRocks</div>
-        <div style={muted}>Rock</div>
-
-        <div style={alert}>
-          <div style={alertTitle}>Heads up</div>
-          <div style={alertBody}>Unable to load Rock.</div>
-        </div>
-      </div>
-    );
-  }
-
-  return <RockBuilder uid={uid} rockId={rockId} initialRock={rock} />;
+  // READY
+  return (
+    <RockBuilder
+      uid={safeTrim(user?.uid)}
+      rockId={rockId}
+      initialRock={initialRock}
+    />
+  );
 }
-
-/* -----------------------------
-   Minimal page styling
------------------------------- */
-
-const shell: React.CSSProperties = {
-  minHeight: "100vh",
-  padding: "28px 22px",
-  background:
-    "radial-gradient(1000px 520px at 20% 20%, rgba(60,130,255,0.20), transparent 60%), radial-gradient(900px 480px at 70% 30%, rgba(255,120,0,0.12), transparent 60%), #050812",
-  color: "rgba(255,255,255,0.92)",
-};
-
-const brand: React.CSSProperties = {
-  fontSize: 44,
-  fontWeight: 900,
-  letterSpacing: -0.5,
-};
-
-const muted: React.CSSProperties = {
-  marginTop: 6,
-  opacity: 0.65,
-};
-
-const alert: React.CSSProperties = {
-  marginTop: 22,
-  maxWidth: 980,
-  padding: 18,
-  borderRadius: 18,
-  border: "1px solid rgba(255,80,80,0.35)",
-  background: "rgba(255,80,80,0.10)",
-};
-
-const alertWarn: React.CSSProperties = {
-  marginTop: 22,
-  maxWidth: 980,
-  padding: 18,
-  borderRadius: 18,
-  border: "1px solid rgba(255,200,80,0.35)",
-  background: "rgba(255,200,80,0.10)",
-};
-
-const alertTitle: React.CSSProperties = {
-  fontSize: 22,
-  fontWeight: 800,
-  marginBottom: 6,
-};
-
-const alertBody: React.CSSProperties = {
-  fontSize: 16,
-  opacity: 0.9,
-};

@@ -2,24 +2,25 @@
    FILE: src/components/RockBuilder.tsx
 
    SCOPE:
-   Fix TypeScript build error:
-   - Remove unreachable `return step === 1;` branch that causes TS to infer
-     step is not 1 in that code path.
-   - Keep behavior:
-     - Disable primary footer button while saving/AI
-     - On Step 1: disable until something is typed
-     - On Steps 2–5: do NOT disable due to step number
+   Rock Builder (Steps 1–5)
+   - Step 5 FLOW FIX:
+     - Prevent “double hero” visual collision
+     - Step 5 header becomes minimal; StepConfirm owns the content
    ============================================================ */
 
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/Button";
+
 import StepDraft from "@/components/rock/StepDraft";
 import StepSmart from "@/components/rock/StepSmart";
 import StepMetrics from "@/components/rock/StepMetrics";
 import StepMilestones from "@/components/rock/StepMilestones";
+import StepConfirm from "@/components/rock/StepConfirm";
+
 import { createRockWithId, updateRock } from "@/lib/rocks";
 
 import type { AiSuggestion, BannerMsg, Props, Step } from "./rockBuilder/types";
@@ -35,6 +36,8 @@ import { stepName, styles } from "./rockBuilder/uiStyles";
 import { assembleFinalRock, getFinalAssemblyKey } from "./rockBuilder/finalAssembler";
 
 export default function RockBuilder({ uid, rockId, initialRock }: Props) {
+  const router = useRouter();
+
   const [step, setStep] = useState<Step>(() => clampStep(initialRock?.step));
 
   const [rock, setRock] = useState<any>(() => ({
@@ -207,8 +210,19 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
   }
 
   const canDraftInteract = useMemo(() => {
-    return !!safeTrim(uid) && !!safeTrim(rockId);
-  }, [uid, rockId]);
+    const sessionUid = safeTrim(uid);
+
+    const rockUserId = safeTrim(rock?.userId);
+    const rockOwnerId = safeTrim(rock?.ownerId);
+
+    if (!sessionUid) return false;
+    if (!safeTrim(rockId)) return false;
+
+    const bound = rockUserId || rockOwnerId;
+    if (bound && bound !== sessionUid) return false;
+
+    return true;
+  }, [uid, rockId, rock?.userId, rock?.ownerId]);
 
   async function continueFromDraftExplicit() {
     if (!canDraftInteract) {
@@ -297,14 +311,13 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
       const top = safeTrim(suggestions?.[0]?.text);
       if (!top) throw new Error("AI did not return a suggestion.");
 
-      // Save suggestion WITHOUT overwriting the user’s draft
       setRock((prev: any) => ({ ...(prev || {}), suggestedImprovement: top }));
       await persistPatchNow({ suggestedImprovement: top });
 
       if (!aliveRef.current) return;
 
       setSaveState("saved");
-      setDraftBanner({ kind: "ok", text: "AI suggestion added below." });
+      setDraftBanner({ kind: "ok", text: "AI suggestion added." });
     } catch (e: any) {
       devError("[RockBuilder] improveWithAiOption3 failed:", e);
 
@@ -324,11 +337,13 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
     const ai = safeTrim(suggestedImprovement);
     if (!ai) return;
 
-    // user draft becomes AI suggestion, and we save it right away.
     setRock((prev: any) => ({ ...(prev || {}), draft: ai }));
     scheduleSave({ draft: ai });
 
-    setDraftBanner({ kind: "ok", text: "Draft replaced with AI suggestion." });
+    setDraftBanner({
+      kind: "ok",
+      text: "Saved — your draft is now the AI version. Click Continue to SMART.",
+    });
   }
 
   function buildFinalFromSmart() {
@@ -347,7 +362,6 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
     goToStep(5);
   }
 
-  // FINAL ROCK ASSEMBLER (runs on Step 5 entry)
   useEffect(() => {
     if (step !== 5) return;
 
@@ -376,7 +390,7 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
 
   const footerPrimaryLabel = useMemo(() => {
     if (step === 1) return "Continue to SMART";
-    if (step === 5) return "Continue";
+    if (step === 5) return "Done";
     return "Continue";
   }, [step]);
 
@@ -385,17 +399,21 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
       await continueFromDraftExplicit();
       return;
     }
+    if (step === 5) {
+      router.push("/dashboard");
+      return;
+    }
     nextStep();
   }
 
-  // ✅ FIXED: remove unreachable branch that caused TS to infer step cannot be 1
   const footerPrimaryDisabled = useMemo(() => {
     if (saveState === "saving" || aiLoading) return true;
-    if (step === 1) return !hasDraftContent; // require something typed
+    if (step === 1 && !hasDraftContent) return true;
     return false;
   }, [saveState, aiLoading, step, hasDraftContent]);
 
   const isStep1 = step === 1;
+  const isStep5 = step === 5;
 
   return (
     <div style={styles.page}>
@@ -414,18 +432,26 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
         <div style={styles.savePillWrap}>
           {saveState === "saving" && <div style={styles.pill}>Saving…</div>}
           {saveState === "saved" && <div style={{ ...styles.pill, opacity: 0.65 }}>Saved</div>}
-          {saveState === "failed" && (
-            <div style={{ ...styles.pill, ...styles.pillFail }}>Save failed</div>
-          )}
+          {saveState === "failed" && <div style={{ ...styles.pill, ...styles.pillFail }}>Save failed</div>}
         </div>
       </div>
 
       <div style={styles.card}>
+        {/* HEADER */}
         {isStep1 ? (
+          <div style={styles.cardHdr}>
+            <div>
+              <div style={{ ...styles.h1, fontSize: 22 }}>Start with a goal…</div>
+              <div style={styles.subMuted}>Don’t overthink it. You’ll make it SMART next.</div>
+            </div>
+          </div>
+        ) : isStep5 ? (
+          // Minimal header for Step 5 to avoid a “double hero” collision.
           <div style={{ ...styles.cardHdr, paddingBottom: 10 }}>
             <div>
-              <div style={{ ...styles.h1, fontSize: 22 }}>Start with a plain-English goal</div>
-              <div style={styles.subMuted}>Don’t overthink it. You’ll make it SMART next.</div>
+              <div style={styles.eyebrow}>CONFIRM</div>
+              <div style={{ ...styles.h1, fontSize: 22 }}>Review and finish</div>
+              <div style={styles.subMuted}>Confirm it looks right, then click Done.</div>
             </div>
           </div>
         ) : (
@@ -433,11 +459,7 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
             <div>
               <div style={styles.eyebrow}>{stepName(step)}</div>
               <div style={styles.h1}>{title}</div>
-              {draft ? (
-                <div style={styles.sub}>{draft}</div>
-              ) : (
-                <div style={styles.subMuted}>Build clear Rocks. Track them weekly.</div>
-              )}
+              {draft ? <div style={styles.sub}>{draft}</div> : <div style={styles.subMuted}>Build clear Rocks. Track them weekly.</div>}
             </div>
           </div>
         )}
@@ -467,7 +489,6 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
           <StepSmart
             rock={rock}
             onUpdateField={(path, value) => {
-              // keep existing behavior
               const parts = path.split(".");
               setRock((prev: any) => {
                 const next = { ...(prev || {}) };
@@ -482,7 +503,6 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
                 return next;
               });
 
-              // autosave patch
               const patch: any = {};
               let pcur: any = patch;
               for (let i = 0; i < parts.length - 1; i++) {
@@ -518,13 +538,17 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
           />
         )}
 
+        {step === 5 && <StepConfirm rock={rock} onJumpToStep={goToStep} />}
+
         <div style={styles.footer}>
           <div style={styles.footerLeft}>Step {step} of 5</div>
 
           <div style={styles.footerRight}>
-            <Button type="button" onClick={prevStep} disabled={step === 1}>
-              Back
-            </Button>
+            {step !== 1 && (
+              <Button type="button" onClick={prevStep}>
+                Back
+              </Button>
+            )}
 
             <Button type="button" onClick={footerPrimaryAction} disabled={footerPrimaryDisabled}>
               {footerPrimaryLabel}

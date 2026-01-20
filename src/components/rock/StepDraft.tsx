@@ -58,7 +58,7 @@ export default function StepDraft({
   const draft = useMemo(() => rock?.draft ?? "", [rock?.draft]);
   const ai = useMemo(() => aiSuggestionText ?? "", [aiSuggestionText]);
 
-  const disabled = !canInteract || saving;
+  const disabled = !!saving;
   const hasAnyInput = (title?.length ?? 0) > 0 || (draft?.length ?? 0) > 0;
   const hasAi = (ai?.length ?? 0) > 0;
 
