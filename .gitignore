@@ -46,3 +46,4 @@ git add .gitignore
 git commit -m "Ignore local PocketRocks backup zips"
 git push origin HEAD
 
+smart-rocks-*.zip
