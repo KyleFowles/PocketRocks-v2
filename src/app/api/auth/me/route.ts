@@ -4,14 +4,15 @@
    SCOPE:
    Auth "me" endpoint (Node runtime)
    - Returns current user from session cookie (or null)
-   - ✅ Awaits getSessionFromServerCookies() (cookies() is async in Next 16)
+   - Normalizes uid/email to canonical form (trim + lowercase)
+   - Awaits getSessionFromServerCookies() (cookies() is async in Next 16)
    ============================================================ */
 
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-import { getSessionFromServerCookies } from "@/lib/auth";
+import { getSessionFromServerCookies, normalizeEmail } from "@/lib/auth";
 
 export async function GET() {
   const secret = process.env.SESSION_SECRET || "";
@@ -23,8 +24,12 @@ export async function GET() {
 
   if (!s) return NextResponse.json({ ok: true, user: null });
 
+  // ✅ Canonicalize on the way out so old cookies can't split identity.
+  const email = normalizeEmail(s.email);
+  const uid = normalizeEmail(s.uid) || email;
+
   return NextResponse.json({
     ok: true,
-    user: { uid: s.uid, email: s.email, name: s.name || "" },
+    user: { uid, email, name: s.name || "" },
   });
 }

@@ -40,3 +40,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 PocketRocks-stable-*.zip
+
+echo "PocketRocks-stable-*.zip" >> .gitignore
+git add .gitignore
+git commit -m "Ignore local PocketRocks backup zips"
+git push origin HEAD
+

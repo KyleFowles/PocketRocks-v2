@@ -1,94 +1,258 @@
 /* ============================================================
-   FILE: src/lib/useAuth.ts
+   FILE: src/lib/useAuth.tsx
 
-   SCOPE:
-   Shared Auth Context + Hook (source of truth = /api/auth/me)
-   - Keeps existing app wiring via AuthContext (providers.tsx)
-   - Uses cookies (credentials: include)
-   - No caching (cache: no-store)
-   - Provides refresh() for UI
+   PURPOSE:
+   Auth context + hook used across the app.
+
+   FIXES:
+   - Add `signOut` to AuthState (AppHeader expects it)
+   - Add `error` to AuthState (Dashboard expects it)
+   - Keep safe defaults in createContext<AuthState>({})
+   - Centralize error handling: set on failures, clear on success
+
+   SIGN-ON HARDENING (Mac + iPhone consistent):
+   - Canonicalize email + uid: trim + lowercase
+   - Defensive trim of password to avoid iOS autofill whitespace issues
    ============================================================ */
 
 "use client";
 
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 export type AuthUser = {
   uid: string;
-  email: string;
-  name?: string;
+  email?: string | null;
+  displayName?: string | null;
 };
 
 export type AuthState = {
-  loading: boolean;
   user: AuthUser | null;
+  loading: boolean;
   error: string | null;
+
+  // Auth actions
   refresh: () => Promise<void>;
+  signIn: (email: string, password: string) => Promise<void>;
+  signUp: (email: string, password: string) => Promise<void>;
+  signOut: () => Promise<void>;
+  clearError: () => void;
 };
 
-async function fetchMe(): Promise<AuthUser | null> {
-  const res = await fetch("/api/auth/me", {
-    method: "GET",
-    credentials: "include",
-    cache: "no-store",
-    headers: { "Cache-Control": "no-cache" },
-  });
+function asText(v: unknown) {
+  return typeof v === "string" ? v : "";
+}
 
-  // Many setups return 200 with { user:null }, but some use 401.
-  if (res.status === 401) return null;
+function normEmail(v: unknown): string {
+  const s = typeof v === "string" ? v : "";
+  return s.trim().toLowerCase();
+}
 
-  const data = (await res.json()) as { ok?: boolean; user?: AuthUser | null };
-  return data?.user ?? null;
+function normUid(v: unknown): string {
+  // In this app, UID is email-based. Keep it canonical.
+  return normEmail(v);
+}
+
+async function safeJson(res: Response) {
+  const text = await res.text();
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return { message: text };
+  }
+}
+
+function normalizeError(e: unknown) {
+  if (e instanceof Error) return e.message || "Something went wrong.";
+  const msg = asText((e as any)?.message);
+  return msg || "Something went wrong.";
 }
 
 export const AuthContext = createContext<AuthState>({
-  loading: true,
   user: null,
+  loading: true,
   error: null,
-  // default no-op; real impl provided by provider
   refresh: async () => {},
+  signIn: async () => {},
+  signUp: async () => {},
+  signOut: async () => {},
+  clearError: () => {},
 });
 
-export function useAuth(): AuthState {
-  return useContext(AuthContext);
-}
-
-/**
- * Optional helper provider if you want to use it directly.
- * (If your app already has an AuthProvider in providers.tsx, you can ignore this.)
- */
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const mounted = useRef(true);
 
-  const refresh = async () => {
-    setError(null);
-    try {
-      const u = await fetchMe();
-      if (!mounted.current) return;
-      setUser(u);
-    } catch (e: any) {
-      if (!mounted.current) return;
-      setError(e?.message || "Auth check failed");
-      setUser(null);
-    } finally {
-      if (!mounted.current) return;
-      setLoading(false);
-    }
-  };
-
+  const aliveRef = useRef(true);
   useEffect(() => {
-    mounted.current = true;
-    refresh();
+    aliveRef.current = true;
     return () => {
-      mounted.current = false;
+      aliveRef.current = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const value = useMemo<AuthState>(() => ({ loading, user, error, refresh }), [loading, user, error]);
+  const clearError = useCallback(() => {
+    if (aliveRef.current) setError(null);
+  }, []);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/auth/me", {
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        if (aliveRef.current) setUser(null);
+        if (aliveRef.current) setError(null); // not signed in is not an "error" state
+        return;
+      }
+
+      const data = await safeJson(res);
+
+      // Expected shape: { user: {...} } OR { uid, email, displayName }
+      const u = (data?.user ?? data) as Partial<AuthUser> | null;
+
+      if (u && typeof u === "object" && typeof (u as any).uid === "string") {
+        const email = normEmail((u as any).email ?? (u as any).uid);
+        const uid = normUid((u as any).uid) || email;
+
+        if (aliveRef.current) {
+          setUser({
+            uid,
+            email: email || null,
+            displayName: (u as any).displayName ?? null,
+          });
+          setError(null);
+        }
+      } else {
+        if (aliveRef.current) {
+          setUser(null);
+          setError(null);
+        }
+      }
+    } catch (e) {
+      if (aliveRef.current) {
+        setUser(null);
+        setError(normalizeError(e));
+      }
+    } finally {
+      if (aliveRef.current) setLoading(false);
+    }
+  }, []);
+
+  const signIn = useCallback(
+    async (email: string, password: string) => {
+      try {
+        const e = normEmail(email);
+        const p = typeof password === "string" ? password.trim() : "";
+
+        const res = await fetch("/api/auth/login", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: e, password: p }),
+        });
+
+        if (!res.ok) {
+          const data = await safeJson(res);
+          const msg = asText(data?.error) || asText(data?.message) || "Sign in failed.";
+          throw new Error(msg);
+        }
+
+        if (aliveRef.current) setError(null);
+        await refresh();
+      } catch (e) {
+        const msg = normalizeError(e);
+        if (aliveRef.current) setError(msg);
+        throw e;
+      }
+    },
+    [refresh]
+  );
+
+  const signUp = useCallback(
+    async (email: string, password: string) => {
+      try {
+        const e = normEmail(email);
+        const p = typeof password === "string" ? password.trim() : "";
+
+        const res = await fetch("/api/auth/signup", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: e, password: p }),
+        });
+
+        if (!res.ok) {
+          const data = await safeJson(res);
+          const msg = asText(data?.error) || asText(data?.message) || "Sign up failed.";
+          throw new Error(msg);
+        }
+
+        if (aliveRef.current) setError(null);
+        await refresh();
+      } catch (e) {
+        const msg = normalizeError(e);
+        if (aliveRef.current) setError(msg);
+        throw e;
+      }
+    },
+    [refresh]
+  );
+
+  const signOut = useCallback(async () => {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (e) {
+      // Even if logout fails, clear local session so UI doesn’t get stuck.
+      if (aliveRef.current) setError(normalizeError(e));
+    } finally {
+      if (aliveRef.current) {
+        setUser(null);
+        // keep error as-is if we set one above; otherwise clear
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    // Initial session check
+    refresh().catch(() => {
+      // refresh already sets error if needed
+    });
+  }, [refresh]);
+
+  const value = useMemo<AuthState>(
+    () => ({
+      user,
+      loading,
+      error,
+      refresh,
+      signIn,
+      signUp,
+      signOut,
+      clearError,
+    }),
+    [user, loading, error, refresh, signIn, signUp, signOut, clearError]
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth() {
+  return useContext(AuthContext);
 }

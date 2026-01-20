@@ -86,7 +86,10 @@ export const card: React.CSSProperties = {
 };
 
 export const cardHdr: React.CSSProperties = {
-  padding: "18px 18px 10px",
+  paddingTop: 18,
+  paddingRight: 18,
+  paddingBottom: 10,
+  paddingLeft: 18,
   display: "flex",
   justifyContent: "space-between",
   gap: 16,

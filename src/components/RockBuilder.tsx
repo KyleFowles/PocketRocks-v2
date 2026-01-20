@@ -3,19 +3,9 @@
 
    SCOPE:
    Rock Builder (Steps 1–5)
-   - Step 1 copy polish:
-     1) Remove "Back" button on Step 1
-     2) Change header text to: "Start with a goal…"
-   - Keeps:
-     - Step 1 AI panel logic as-is (handled inside StepDraft)
-     - Autosave + AI flow
-     - Final assembly on Step 5 entry
-
-   STABILITY FIXES (HIGH VISIBILITY):
-   - RockBuilder can now work even if parent only passes initialRock
-     (it derives uid + rockId from initialRock as a fallback)
-   - Removes React warning about mixing padding + paddingBottom
-   - Step 5 "Continue" now navigates to /dashboard (so it actually does something)
+   - Step 5 FLOW FIX:
+     - Prevent “double hero” visual collision
+     - Step 5 header becomes minimal; StepConfirm owns the content
    ============================================================ */
 
 "use client";
@@ -24,10 +14,13 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/Button";
+
 import StepDraft from "@/components/rock/StepDraft";
 import StepSmart from "@/components/rock/StepSmart";
 import StepMetrics from "@/components/rock/StepMetrics";
 import StepMilestones from "@/components/rock/StepMilestones";
+import StepConfirm from "@/components/rock/StepConfirm";
+
 import { createRockWithId, updateRock } from "@/lib/rocks";
 
 import type { AiSuggestion, BannerMsg, Props, Step } from "./rockBuilder/types";
@@ -45,41 +38,14 @@ import { assembleFinalRock, getFinalAssemblyKey } from "./rockBuilder/finalAssem
 export default function RockBuilder({ uid, rockId, initialRock }: Props) {
   const router = useRouter();
 
-  // ---------------------------------------------------------------------------
-  // IMPORTANT: Parent pages sometimes render <RockBuilder initialRock={...} />
-  // without passing uid/rockId props. So we derive stable fallbacks here.
-  // ---------------------------------------------------------------------------
-  const effectiveUid = useMemo(() => {
-    const fromProp = safeTrim(uid);
-    if (fromProp) return fromProp;
-
-    const fromRockUserId = safeTrim((initialRock as any)?.userId);
-    if (fromRockUserId) return fromRockUserId;
-
-    const fromRockOwnerId = safeTrim((initialRock as any)?.ownerId);
-    if (fromRockOwnerId) return fromRockOwnerId;
-
-    return "";
-  }, [uid, initialRock]);
-
-  const effectiveRockId = useMemo(() => {
-    const fromProp = safeTrim(rockId);
-    if (fromProp) return fromProp;
-
-    const fromInitial = safeTrim((initialRock as any)?.id);
-    if (fromInitial) return fromInitial;
-
-    return "";
-  }, [rockId, initialRock]);
-
-  const [step, setStep] = useState<Step>(() => clampStep((initialRock as any)?.step));
+  const [step, setStep] = useState<Step>(() => clampStep(initialRock?.step));
 
   const [rock, setRock] = useState<any>(() => ({
     ...(initialRock || {}),
-    id: effectiveRockId,
-    userId: effectiveUid,
-    metrics: Array.isArray((initialRock as any)?.metrics) ? (initialRock as any).metrics : [],
-    milestones: Array.isArray((initialRock as any)?.milestones) ? (initialRock as any).milestones : [],
+    id: rockId,
+    userId: uid,
+    metrics: Array.isArray(initialRock?.metrics) ? initialRock.metrics : [],
+    milestones: Array.isArray(initialRock?.milestones) ? initialRock.milestones : [],
   }));
 
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
@@ -112,34 +78,30 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
   useEffect(() => {
     userNavigatedStepRef.current = false;
     lastAssembledKeyRef.current = "";
-  }, [effectiveRockId]);
+  }, [rockId]);
 
   useEffect(() => {
     setRock((prev: any) => ({
       ...(prev || {}),
       ...(initialRock || {}),
-      id: effectiveRockId,
-      userId: effectiveUid,
-      metrics: Array.isArray((initialRock as any)?.metrics)
-        ? (initialRock as any).metrics
-        : prev?.metrics ?? [],
-      milestones: Array.isArray((initialRock as any)?.milestones)
-        ? (initialRock as any).milestones
+      id: rockId,
+      userId: uid,
+      metrics: Array.isArray((initialRock || {})?.metrics) ? initialRock.metrics : prev?.metrics ?? [],
+      milestones: Array.isArray((initialRock || {})?.milestones)
+        ? initialRock.milestones
         : prev?.milestones ?? [],
     }));
 
-    if (!userNavigatedStepRef.current && initialRock && (initialRock as any).step !== undefined) {
-      setStep(clampStep((initialRock as any).step));
+    if (!userNavigatedStepRef.current && initialRock && initialRock.step !== undefined) {
+      setStep(clampStep(initialRock.step));
     }
-  }, [effectiveRockId, effectiveUid, initialRock]);
+  }, [rockId, uid, initialRock]);
 
   useEffect(() => {
     const hasDoc =
-      !!initialRock &&
-      !!safeTrim((initialRock as any)?.userId || (initialRock as any)?.ownerId) &&
-      !!safeTrim((initialRock as any)?.id || effectiveRockId);
+      !!initialRock && !!safeTrim(initialRock?.userId) && !!safeTrim(initialRock?.id || rockId);
     createdRef.current = !!hasDoc;
-  }, [initialRock, effectiveRockId]);
+  }, [initialRock, rockId]);
 
   const title = useMemo(() => safeStr(rock?.title) || "Rock", [rock?.title]);
   const draft = useMemo(() => safeStr(rock?.draft), [rock?.draft]);
@@ -158,8 +120,8 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
 
     const payload = stripUndefinedDeep({
       ...(baseData || {}),
-      id: effectiveRockId,
-      userId: effectiveUid,
+      id: rockId,
+      userId: uid,
       step: clampStep(baseData?.step),
       title: safeStr(baseData?.title ?? rock?.title),
       draft: safeStr(baseData?.draft ?? rock?.draft),
@@ -169,7 +131,7 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
         : [],
     });
 
-    await createRockWithId(effectiveUid, effectiveRockId, payload);
+    await createRockWithId(uid, rockId, payload);
     createdRef.current = true;
   }
 
@@ -178,7 +140,7 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
     if (!cleaned || (typeof cleaned === "object" && Object.keys(cleaned).length === 0)) return;
 
     await ensureCreatedIfNeeded(cleaned);
-    await updateRock(effectiveUid, effectiveRockId, cleaned);
+    await updateRock(uid, rockId, cleaned);
   }
 
   function scheduleSave(patch: any) {
@@ -248,22 +210,19 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
   }
 
   const canDraftInteract = useMemo(() => {
-    const sessionUid = safeTrim(effectiveUid);
+    const sessionUid = safeTrim(uid);
 
-    // In this app, the client state uses userId (not ownerId).
-    // The server may return ownerId, so we accept either.
     const rockUserId = safeTrim(rock?.userId);
     const rockOwnerId = safeTrim(rock?.ownerId);
 
     if (!sessionUid) return false;
-    if (!safeTrim(effectiveRockId)) return false;
+    if (!safeTrim(rockId)) return false;
 
-    // If the rock is already tied to a user, it must match the session.
     const bound = rockUserId || rockOwnerId;
     if (bound && bound !== sessionUid) return false;
 
     return true;
-  }, [effectiveUid, effectiveRockId, rock?.userId, rock?.ownerId]);
+  }, [uid, rockId, rock?.userId, rock?.ownerId]);
 
   async function continueFromDraftExplicit() {
     if (!canDraftInteract) {
@@ -343,16 +302,15 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
 
       const data = await res.json();
 
-      const suggestions: AiSuggestion[] = Array.isArray((data as any)?.suggestions)
-        ? (data as any).suggestions
+      const suggestions: AiSuggestion[] = Array.isArray(data?.suggestions)
+        ? data.suggestions
         : Array.isArray(data)
-          ? (data as any)
+          ? data
           : [];
 
-      const top = safeTrim((suggestions as any)?.[0]?.text);
+      const top = safeTrim(suggestions?.[0]?.text);
       if (!top) throw new Error("AI did not return a suggestion.");
 
-      // Save suggestion WITHOUT overwriting the user’s draft
       setRock((prev: any) => ({ ...(prev || {}), suggestedImprovement: top }));
       await persistPatchNow({ suggestedImprovement: top });
 
@@ -382,7 +340,10 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
     setRock((prev: any) => ({ ...(prev || {}), draft: ai }));
     scheduleSave({ draft: ai });
 
-    setDraftBanner({ kind: "ok", text: "Draft replaced with AI suggestion." });
+    setDraftBanner({
+      kind: "ok",
+      text: "Saved — your draft is now the AI version. Click Continue to SMART.",
+    });
   }
 
   function buildFinalFromSmart() {
@@ -401,7 +362,6 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
     goToStep(5);
   }
 
-  // FINAL ROCK ASSEMBLER (runs on Step 5 entry)
   useEffect(() => {
     if (step !== 5) return;
 
@@ -439,12 +399,10 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
       await continueFromDraftExplicit();
       return;
     }
-
     if (step === 5) {
       router.push("/dashboard");
       return;
     }
-
     nextStep();
   }
 
@@ -455,6 +413,7 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
   }, [saveState, aiLoading, step, hasDraftContent]);
 
   const isStep1 = step === 1;
+  const isStep5 = step === 5;
 
   return (
     <div style={styles.page}>
@@ -473,20 +432,26 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
         <div style={styles.savePillWrap}>
           {saveState === "saving" && <div style={styles.pill}>Saving…</div>}
           {saveState === "saved" && <div style={{ ...styles.pill, opacity: 0.65 }}>Saved</div>}
-          {saveState === "failed" && (
-            <div style={{ ...styles.pill, ...styles.pillFail }}>Save failed</div>
-          )}
+          {saveState === "failed" && <div style={{ ...styles.pill, ...styles.pillFail }}>Save failed</div>}
         </div>
       </div>
 
       <div style={styles.card}>
+        {/* HEADER */}
         {isStep1 ? (
-          // IMPORTANT: Do NOT add paddingBottom here (it conflicts with styles.cardHdr padding shorthand).
-          // Use a nested spacer instead to avoid the React warning overlay.
           <div style={styles.cardHdr}>
-            <div style={{ marginBottom: 10 }}>
+            <div>
               <div style={{ ...styles.h1, fontSize: 22 }}>Start with a goal…</div>
               <div style={styles.subMuted}>Don’t overthink it. You’ll make it SMART next.</div>
+            </div>
+          </div>
+        ) : isStep5 ? (
+          // Minimal header for Step 5 to avoid a “double hero” collision.
+          <div style={{ ...styles.cardHdr, paddingBottom: 10 }}>
+            <div>
+              <div style={styles.eyebrow}>CONFIRM</div>
+              <div style={{ ...styles.h1, fontSize: 22 }}>Review and finish</div>
+              <div style={styles.subMuted}>Confirm it looks right, then click Done.</div>
             </div>
           </div>
         ) : (
@@ -494,11 +459,7 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
             <div>
               <div style={styles.eyebrow}>{stepName(step)}</div>
               <div style={styles.h1}>{title}</div>
-              {draft ? (
-                <div style={styles.sub}>{draft}</div>
-              ) : (
-                <div style={styles.subMuted}>Build clear Rocks. Track them weekly.</div>
-              )}
+              {draft ? <div style={styles.sub}>{draft}</div> : <div style={styles.subMuted}>Build clear Rocks. Track them weekly.</div>}
             </div>
           </div>
         )}
@@ -517,7 +478,7 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
             saving={saveState === "saving" || aiLoading}
             saved={saveState === "saved"}
             banner={draftBanner}
-            canInteract={canDraftInteract && !aiLoading}
+            canInteract={!!safeTrim(uid) && !!safeTrim(rockId) && !aiLoading}
             onImproveWithAI={improveWithAiOption3}
             aiSuggestionText={suggestedImprovement}
             onApplyAiSuggestionToDraft={applyAiSuggestionToDraft}
@@ -577,11 +538,12 @@ export default function RockBuilder({ uid, rockId, initialRock }: Props) {
           />
         )}
 
+        {step === 5 && <StepConfirm rock={rock} onJumpToStep={goToStep} />}
+
         <div style={styles.footer}>
           <div style={styles.footerLeft}>Step {step} of 5</div>
 
           <div style={styles.footerRight}>
-            {/* Step 1 has no Back button (clean entry screen) */}
             {step !== 1 && (
               <Button type="button" onClick={prevStep}>
                 Back

@@ -5,7 +5,8 @@
    Login API (Node runtime)
    - Uses firebase-admin Firestore
    - Creates session token with SESSION_SECRET
-   - ✅ Awaits setSessionCookie() (cookies() is async in Next 16)
+   - Email is canonicalized (trim + lowercase) and used as UID
+   - Awaits setSessionCookie() (cookies() is async in Next 16)
    ============================================================ */
 
 import { NextResponse } from "next/server";
@@ -32,8 +33,11 @@ export async function POST(req: Request) {
 
     const body = (await req.json().catch(() => ({}))) as Body;
 
+    // ✅ Canonical email: trim + lowercase
     const email = normalizeEmail(body.email);
-    const password = typeof body.password === "string" ? body.password : "";
+
+    // ✅ Defensive trim (iOS autofill can add whitespace)
+    const password = typeof body.password === "string" ? body.password.trim() : "";
 
     if (!email || !password) {
       return NextResponse.json(
@@ -52,14 +56,14 @@ export async function POST(req: Request) {
 
     const data = snap.data() || {};
     const passwordHash = typeof data.passwordHash === "string" ? data.passwordHash : "";
-    const uid = typeof data.uid === "string" ? data.uid : email;
     const name = typeof data.name === "string" ? data.name : "";
 
     if (!passwordHash || !verifyPassword(password, passwordHash)) {
       return NextResponse.json({ ok: false, error: "Invalid email or password." }, { status: 401 });
     }
 
-    const user: SessionUser = { uid, email };
+    // ✅ UID is ALWAYS the normalized email
+    const user: SessionUser = { uid: email, email };
     if (name.trim()) user.name = name.trim();
 
     const token = createSessionToken(user, secret);

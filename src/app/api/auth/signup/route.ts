@@ -5,6 +5,7 @@
    Signup API (Node runtime)
    - Creates user record in Firestore (firebase-admin)
    - Issues session cookie (SESSION_SECRET)
+   - Email is canonicalized (trim + lowercase) and used as UID
    ============================================================ */
 
 import { NextResponse } from "next/server";
@@ -31,8 +32,12 @@ export async function POST(req: Request) {
 
     const body = (await req.json().catch(() => ({}))) as Body;
 
+    // ✅ Canonical email: trim + lowercase
     const email = normalizeEmail(body.email);
-    const password = typeof body.password === "string" ? body.password : "";
+
+    // ✅ Defensive trim (iOS autofill can add whitespace)
+    const password = typeof body.password === "string" ? body.password.trim() : "";
+
     const name = typeof body.name === "string" ? body.name.trim() : "";
 
     if (!email || !password) {
@@ -52,7 +57,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Account already exists." }, { status: 409 });
     }
 
-    // simple stable uid for now
+    // ✅ UID is ALWAYS the normalized email
     const uid = email;
     const passwordHash = hashPassword(password);
 

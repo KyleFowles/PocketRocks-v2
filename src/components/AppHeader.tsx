@@ -1,72 +1,93 @@
 /* ============================================================
    FILE: src/components/AppHeader.tsx
 
-   SCOPE:
-   App header bar.
-   - Uses Button variant="dangerGhost" for Logout
-   - No logic changes; aligns with ButtonVariant typing
+   FIX:
+   - This file already expects signOut from useAuth()
+   - Keep it as-is, but ensure it calls signOut safely
    ============================================================ */
 
 "use client";
 
 import React, { useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-
-import { Button } from "@/components/Button";
 import { useAuth } from "@/lib/useAuth";
+import { Button } from "@/components/Button";
 
 export default function AppHeader() {
   const router = useRouter();
   const pathname = usePathname();
 
   const { user, loading, signOut } = useAuth();
-
   const [loggingOut, setLoggingOut] = useState(false);
 
-  const showLogout = useMemo(() => {
-    // Don’t show on login page
-    if (!pathname) return false;
+  const showHeader = useMemo(() => {
+    // Keep header hidden on auth pages if you want (adjust as needed)
+    if (!pathname) return true;
     if (pathname.startsWith("/login")) return false;
+    if (pathname.startsWith("/signup")) return false;
     return true;
   }, [pathname]);
 
-  const statusLabel = useMemo(() => {
-    if (loading) return "Loading…";
-    if (!user) return "Signed out";
-    return "Signed in";
-  }, [user, loading]);
+  if (!showHeader) return null;
 
-  async function handleLogout() {
+  const onLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
     try {
-      setLoggingOut(true);
       await signOut();
       router.push("/login");
     } finally {
       setLoggingOut(false);
     }
-  }
+  };
 
   return (
-    <header className="w-full border-b border-white/10 bg-black/20 backdrop-blur">
-      <div className="mx-auto max-w-5xl px-4 py-3 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="text-white font-extrabold tracking-tight">
+    <header
+      style={{
+        position: "sticky",
+        top: 0,
+        zIndex: 50,
+        backdropFilter: "blur(10px)",
+        background: "rgba(20, 34, 51, 0.85)",
+        borderBottom: "1px solid rgba(229, 232, 235, 0.15)",
+      }}
+    >
+      <div
+        style={{
+          maxWidth: 1100,
+          margin: "0 auto",
+          padding: "12px 16px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <div style={{ fontWeight: 800, letterSpacing: 0.5, color: "#E5E8EB" }}>
             PocketRocks
           </div>
-          <div className="text-xs text-white/60">{statusLabel}</div>
+          <div style={{ fontSize: 12, color: "rgba(229, 232, 235, 0.75)" }}>
+            {loading ? "Checking..." : user ? user.email ?? "Signed in" : "Signed out"}
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {showLogout && (
-            <Button
-              variant="dangerGhost"
-              onClick={handleLogout}
-              disabled={!user || loading || loggingOut}
-              title={statusLabel ?? "Logout"}
-            >
-              {loggingOut ? "Logging out…" : "Logout"}
-            </Button>
-          )}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Button
+            variant="secondary"
+            onClick={() => router.push("/rocks")}
+            disabled={loading}
+          >
+            Rocks
+          </Button>
+
+          <Button
+            variant="primary"
+            onClick={onLogout}
+            disabled={loading || !user || loggingOut}
+          >
+            {loggingOut ? "Signing out..." : "Sign out"}
+          </Button>
         </div>
       </div>
     </header>

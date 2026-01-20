@@ -2,234 +2,160 @@
    FILE: src/app/rocks/[rockId]/page.tsx
 
    SCOPE:
-   Rock page — stable load/create flow with Firestore LOCKED DOWN
-   - Uses API routes only:
-       POST /api/rocks (create with id)
-       GET  /api/rocks/[rockId] (load)
-       PATCH /api/rocks/[rockId] (save/update) via src/lib/rocks.ts
-   - Fixes "flash then not_found" when visiting /rocks/<id>?new=1
-   - Next.js 16: params/searchParams are Promises in app router pages
-   - CRITICAL FIX:
-       Always pass uid + rockId into RockBuilder so Step 1 gating works.
+   Rock Detail / Builder Route
+   - Fix TS: user possibly null (build blocker)
+   - World-class flow:
+     - If user missing: route to /login (no partial writes)
+     - If ?new=1: create rock once, then replace URL to remove new=1
+     - Load rock data safely before rendering builder
    ============================================================ */
 
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+
+import RockBuilder from "@/components/RockBuilder";
+import { Button } from "@/components/Button";
 
 import { useAuth } from "@/lib/useAuth";
-import { getRock, createRockWithId } from "@/lib/rocks";
-import type { Rock } from "@/types/rock";
+import { createRockWithId } from "@/lib/rocks";
 
-// If your repo uses a shared builder component, keep it.
-import RockBuilder from "@/components/RockBuilder";
-
-type Props = {
-  params: Promise<{ rockId: string }>;
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
-};
-
-type LoadState =
-  | { kind: "loading" }
-  | { kind: "error"; message: string }
-  | { kind: "not_found" }
-  | { kind: "ready"; rock: Rock };
-
-function toSingle(v: string | string[] | undefined): string {
-  if (Array.isArray(v)) return v[0] ?? "";
-  return typeof v === "string" ? v : "";
+function safeTrim(v: unknown) {
+  return typeof v === "string" ? v.trim() : "";
 }
 
-async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    credentials: "include",
-    cache: "no-store",
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
-    },
-  });
+type LoadState = "loading" | "ready" | "error";
 
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const msg = typeof (data as any)?.error === "string" ? (data as any).error : `HTTP ${res.status}`;
-    throw new Error(msg);
-  }
-  return data as T;
-}
+export default function RockPage() {
+  const router = useRouter();
+  const params = useParams();
+  const searchParams = useSearchParams();
 
-export default function RockPage(props: Props) {
+  const rockId = useMemo(() => safeTrim((params as any)?.rockId), [params]);
+  const isNew = useMemo(() => safeTrim(searchParams?.get("new")) === "1", [searchParams]);
+
   const { user, loading: authLoading } = useAuth();
 
-  const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [state, setState] = useState<LoadState>("loading");
+  const [err, setErr] = useState<string | null>(null);
 
+  const [initialRock, setInitialRock] = useState<any>(null);
+
+  // Guard to prevent double-create in React strict mode / rerenders
   const createdOnceRef = useRef(false);
-  const mountedRef = useRef(true);
 
-  const [rockId, setRockId] = useState<string>("");
-  const [isNew, setIsNew] = useState<boolean>(false);
+  // ---------- Helper: Load rock via API ----------
+  async function loadRock(uid: string, id: string) {
+    const res = await fetch(`/api/rocks/${id}`, { method: "GET" });
+    if (!res.ok) throw new Error(`Failed to load rock (${res.status}).`);
+    const data = await res.json();
+    // The API may return null/undefined or missing shape — normalize lightly.
+    return data || { id, userId: uid };
+  }
 
-  // Resolve params + searchParams once.
   useEffect(() => {
-    mountedRef.current = true;
-
-    (async () => {
-      const p = await props.params;
-      const sp = props.searchParams ? await props.searchParams : {};
-      const newFlag = toSingle(sp?.new);
-
-      if (!mountedRef.current) return;
-
-      setRockId(String(p.rockId || ""));
-      setIsNew(newFlag === "1" || newFlag.toLowerCase() === "true");
-    })().catch(() => {
-      // If something goes wrong parsing, just let load logic handle it.
-      setRockId("");
-      setIsNew(false);
-    });
-
-    return () => {
-      mountedRef.current = false;
-    };
-  }, [props.params, props.searchParams]);
-
-  // Load (and create-if-new) once auth + rockId are known.
-  useEffect(() => {
-    if (authLoading) return;
-
-    if (!user) {
-      setState({ kind: "error", message: "Not signed in." });
-      return;
-    }
-
-    if (!rockId) {
-      setState({ kind: "error", message: "Missing Rock id." });
-      return;
-    }
-
     let cancelled = false;
 
-    async function load() {
-      setState({ kind: "loading" });
+    async function run() {
+      setErr(null);
+      setState("loading");
 
-      // 1) If this is a new rock link, create it ONCE before loading.
-      if (isNew && !createdOnceRef.current) {
-        createdOnceRef.current = true;
-
-        // Minimal initial payload. Keep it simple and stable.
-        // userId is enforced server-side in API routes; safe to omit here.
-        const initial: Partial<Rock> = {
-          id: rockId,
-          title: "",
-          draft: "",
-          companyId: "default",
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-
-        try {
-          // Uses client lib wrapper (POST /api/rocks with id)
-          await createRockWithId(user.uid, rockId, initial);
-        } catch (e: any) {
-          if (cancelled) return;
-          setState({ kind: "error", message: e?.message || "Failed to create Rock." });
-          return;
-        }
+      const id = rockId;
+      if (!id) {
+        setErr("Missing rock id.");
+        setState("error");
+        return;
       }
 
-      // 2) Load the rock
+      // Wait for auth to resolve
+      if (authLoading) return;
+
+      // If not signed in, route to login (world-class: no partial writes)
+      if (!user || !safeTrim(user.uid)) {
+        router.push("/login");
+        return;
+      }
+
+      const uid = user.uid;
+
       try {
-        const r = await getRock(user.uid, rockId);
-        if (cancelled) return;
+        // If URL indicates "new", create once, then remove the flag from URL.
+        if (isNew && !createdOnceRef.current) {
+          createdOnceRef.current = true;
 
-        if (!r) {
-          // If it was supposed to be new, try one more time to create via API directly,
-          // then reload. This covers edge cases where createRockWithId is not wired.
-          if (isNew) {
-            try {
-              await apiJson<{ ok: true; id: string }>("/api/rocks", {
-                method: "POST",
-                body: JSON.stringify({
-                  id: rockId,
-                  title: "",
-                  draft: "",
-                  companyId: "default",
-                  createdAt: Date.now(),
-                  updatedAt: Date.now(),
-                }),
-              });
+          const initial = {
+            id,
+            userId: uid,
+            step: 1,
+            title: "",
+            draft: "",
+            metrics: [],
+            milestones: [],
+          };
 
-              const r2 = await getRock(user.uid, rockId);
-              if (cancelled) return;
+          await createRockWithId(uid, id, initial);
 
-              if (!r2) {
-                setState({ kind: "not_found" });
-                return;
-              }
-
-              setState({ kind: "ready", rock: r2 });
-              return;
-            } catch (e: any) {
-              if (cancelled) return;
-              setState({ kind: "error", message: e?.message || "Failed to create/load Rock." });
-              return;
-            }
-          }
-
-          setState({ kind: "not_found" });
-          return;
+          // ✅ stop treating this as "new" going forward.
+          // This prevents surprise “jump back” behavior.
+          router.replace(`/rocks/${id}`);
         }
 
-        setState({ kind: "ready", rock: r });
+        const loaded = await loadRock(uid, id);
+
+        if (cancelled) return;
+
+        setInitialRock(loaded);
+        setState("ready");
       } catch (e: any) {
         if (cancelled) return;
-        setState({ kind: "error", message: e?.message || "Failed to load Rock." });
+        setErr(e?.message || "Something went wrong.");
+        setState("error");
       }
     }
 
-    load();
+    run();
 
     return () => {
       cancelled = true;
     };
-  }, [authLoading, user, rockId, isNew]);
+  }, [rockId, isNew, authLoading, user, router]);
 
-  const content = useMemo(() => {
-    if (state.kind === "loading") {
-      return (
-        <div style={{ padding: 20 }}>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>Loading Rock…</div>
-          <div style={{ opacity: 0.85 }}>One moment.</div>
+  if (state === "loading") {
+    return (
+      <div className="pr-page" style={{ padding: 22 }}>
+        <div style={{ opacity: 0.8, fontWeight: 800 }}>Loading Rock…</div>
+        <div style={{ opacity: 0.6, marginTop: 6, fontSize: 13 }}>
+          Getting your data ready.
         </div>
-      );
-    }
+      </div>
+    );
+  }
 
-    if (state.kind === "error") {
-      return (
-        <div style={{ padding: 20 }}>
-          <div style={{ fontWeight: 800, marginBottom: 8 }}>Couldn’t load Rock</div>
-          <div style={{ opacity: 0.9 }}>{state.message}</div>
+  if (state === "error") {
+    return (
+      <div className="pr-page" style={{ padding: 22 }}>
+        <div style={{ fontWeight: 900, fontSize: 18 }}>Couldn’t load this Rock</div>
+        <div style={{ opacity: 0.75, marginTop: 8 }}>{err || "Unknown error."}</div>
+
+        <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <Button type="button" onClick={() => router.push("/dashboard")}>
+            Back to dashboard
+          </Button>
+          <Button type="button" onClick={() => router.refresh()}>
+            Try again
+          </Button>
         </div>
-      );
-    }
+      </div>
+    );
+  }
 
-    if (state.kind === "not_found") {
-      return (
-        <div style={{ padding: 20 }}>
-          <div style={{ fontWeight: 800, marginBottom: 8 }}>Rock not found</div>
-          <div style={{ opacity: 0.9 }}>
-            This Rock doesn’t exist yet. If you expected it to be created, go back and click{" "}
-            <b>New Rock</b> again.
-          </div>
-        </div>
-      );
-    }
-
-    // Ready
-    // CRITICAL: pass uid + rockId so RockBuilder gating + saves work.
-    return <RockBuilder uid={user?.uid || ""} rockId={rockId} initialRock={state.rock} />;
-  }, [state, user, rockId]);
-
-  return <div>{content}</div>;
+  // READY
+  return (
+    <RockBuilder
+      uid={safeTrim(user?.uid)}
+      rockId={rockId}
+      initialRock={initialRock}
+    />
+  );
 }

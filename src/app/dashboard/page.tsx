@@ -1,73 +1,69 @@
 /* ============================================================
    FILE: src/app/dashboard/page.tsx
 
-   SCOPE:
-   Dashboard reads auth from useAuth() (client-side)
-   - Shows "Checking sign-in..." while loading
-   - If signed in, shows the real dashboard shell
+   FIX:
+   - Stop referencing user.name (not in AuthUser)
+   - Use user.displayName instead
+   - Safe fallback if displayName missing
    ============================================================ */
 
 "use client";
 
 import React from "react";
-import Link from "next/link";
 import { useAuth } from "@/lib/useAuth";
+import { Button } from "@/components/Button";
 
 export default function DashboardPage() {
-  const { loading, user, error, refresh } = useAuth();
+  const { loading, user, refresh } = useAuth();
+
+  const display =
+    (user?.displayName && user.displayName.trim()) ||
+    (user?.email ?? "") ||
+    "";
 
   return (
     <div style={{ maxWidth: 980, margin: "0 auto", padding: "24px 16px" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <h1 style={{ margin: 0 }}>Dashboard</h1>
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <Link href="/rocks/new">New Rock</Link>
-          <button
-            onClick={refresh}
-            style={{
-              padding: "8px 10px",
-              borderRadius: 10,
-              border: "1px solid rgba(255,255,255,0.15)",
-              background: "transparent",
-              color: "inherit",
-              cursor: "pointer",
-            }}
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800 }}>Dashboard</h1>
+
+        <div style={{ marginLeft: "auto" }}>
+          <Button
+            variant="secondary"
+            onClick={() => refresh()}
+            disabled={loading}
           >
             Refresh
-          </button>
+          </Button>
         </div>
       </div>
 
-      <div style={{ marginTop: 16, padding: 14, borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)" }}>
+      <div
+        style={{
+          marginTop: 18,
+          padding: 16,
+          borderRadius: 16,
+          border: "1px solid rgba(229, 232, 235, 0.15)",
+          background: "rgba(20, 34, 51, 0.55)",
+        }}
+      >
         {loading ? (
-          <div>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>Checking sign-in…</div>
-            <div style={{ opacity: 0.85 }}>One moment.</div>
-          </div>
-        ) : error ? (
-          <div>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>Auth error</div>
-            <div style={{ opacity: 0.9 }}>{error}</div>
-          </div>
+          <div style={{ opacity: 0.9 }}>Checking sign-in…</div>
         ) : user ? (
-          <div>
+          <>
             <div style={{ fontWeight: 700, marginBottom: 6 }}>Signed in</div>
-            <div style={{ opacity: 0.9 }}>
-              {user.email} {user.name ? `(${user.name})` : ""}
-            </div>
+            <div style={{ opacity: 0.9 }}>{display}</div>
 
             <div style={{ marginTop: 14, opacity: 0.9 }}>
-              Next step: click <b>New Rock</b> to confirm create → save → continue works.
+              UID: <code>{user.uid}</code>
             </div>
-          </div>
+          </>
         ) : (
-          <div>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>Not signed in</div>
-            <div style={{ opacity: 0.9 }}>Please sign in to view your Rocks.</div>
-            <div style={{ marginTop: 10 }}>
-              <Link href="/login">Go to Login</Link>
+          <>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>Signed out</div>
+            <div style={{ opacity: 0.9 }}>
+              You are not signed in right now.
             </div>
-          </div>
+          </>
         )}
       </div>
     </div>

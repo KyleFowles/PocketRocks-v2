@@ -11,10 +11,19 @@
        PATCH /api/rocks/[rockId]
    ============================================================ */
 
-import type { Rock } from "@/types/rock";
+import type { Rock, RockStatus } from "@/types/rock";
+
+/**
+ * RockLike is what the UI wants to work with.
+ * It remains compatible with Rock, but allows a couple optional fields
+ * that may not exist in the strict Rock type everywhere.
+ */
+type RockLike = Rock & {
+  archived?: boolean;
+  notes?: string;
+};
 
 type ApiOk<T> = { ok: true } & T;
-type ApiErr = { ok: false; error: string };
 
 function isObj(v: unknown): v is Record<string, any> {
   return typeof v === "object" && v !== null;
@@ -26,6 +35,15 @@ function cleanStr(v: unknown): string {
 
 function toNum(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+function toRockStatus(v: unknown): RockStatus | undefined {
+  const s = cleanStr(v);
+  if (!s) return undefined;
+
+  // Keep TS happy and UI stable. (If you later want strict validation,
+  // we can align this to your exact RockStatus union values.)
+  return s as unknown as RockStatus;
 }
 
 function mapApiError(err: unknown): string {
@@ -57,9 +75,9 @@ async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-function normalizeRock(id: string, data: any): Rock {
+function normalizeRock(id: string, data: any): RockLike {
   // Keep the UI stable even if fields are missing.
-  return {
+  const base: RockLike = {
     id,
     companyId: cleanStr(data?.companyId) || "default",
     userId: cleanStr(data?.ownerId) || "",
@@ -68,21 +86,31 @@ function normalizeRock(id: string, data: any): Rock {
     draft: cleanStr(data?.draft),
 
     dueDate: cleanStr(data?.dueDate),
-    status: cleanStr(data?.status),
+    status: toRockStatus(data?.status),
 
     // Optional fields commonly used in builders:
     metrics: Array.isArray(data?.metrics) ? data.metrics : [],
     milestones: Array.isArray(data?.milestones) ? data.milestones : [],
+
+    // Optional text field (allowed by RockLike even if Rock doesn't include it everywhere):
     notes: cleanStr(data?.notes),
 
+    // Optional flag used by list filtering:
     archived: !!data?.archived,
 
     createdAt: toNum(data?.createdAt) ?? Date.now(),
     updatedAt: toNum(data?.updatedAt) ?? Date.now(),
+  };
 
-    // Pass through any extra known fields safely:
-    ...(isObj(data) ? data : {}),
-  } as Rock;
+  // Pass through extra fields safely, but do NOT let them overwrite normalized keys.
+  if (isObj(data)) {
+    return {
+      ...data,
+      ...base,
+    } as RockLike;
+  }
+
+  return base;
 }
 
 /* ============================================================
@@ -94,11 +122,11 @@ function normalizeRock(id: string, data: any): Rock {
 export async function listRocks(_uid: string, opts?: { includeArchived?: boolean }) {
   try {
     const data = await apiJson<ApiOk<{ items: any[] }>>("/api/rocks");
-    const items = Array.isArray(data.items) ? data.items : [];
-    const rocks = items.map((r) => normalizeRock(String(r?.id || ""), r));
+    const items = Array.isArray((data as any).items) ? (data as any).items : [];
+    const rocks: RockLike[] = items.map((r: any) => normalizeRock(String(r?.id || ""), r));
 
     if (opts?.includeArchived) return rocks;
-    return rocks.filter((r) => !r.archived);
+    return rocks.filter((r: RockLike) => !r.archived);
   } catch (err) {
     throw new Error(mapApiError(err));
   }
@@ -110,10 +138,10 @@ export async function getRock(_uid: string, rockId: string): Promise<Rock | null
     if (!rid) return null;
 
     const data = await apiJson<ApiOk<{ item: any }>>(`/api/rocks/${encodeURIComponent(rid)}`);
-    const item = data.item;
+    const item = (data as any).item;
     if (!item) return null;
 
-    return normalizeRock(rid, item);
+    return normalizeRock(rid, item) as Rock;
   } catch (err) {
     const msg = mapApiError(err);
     if (msg.toLowerCase().includes("not found")) return null;
@@ -144,7 +172,7 @@ export async function createRock(_uid: string, rock: Partial<Rock>) {
       body: JSON.stringify({ ...rock }),
     });
 
-    return cleanStr(data.id);
+    return cleanStr((data as any).id);
   } catch (err) {
     throw new Error(mapApiError(err));
   }
